@@ -1,0 +1,21 @@
+Star Field Image Generator
+By Tom Lechner, tomlechner.com
+2013
+
+
+This will process the Tycho 2 Star Catalog, and create an equirectangular
+image of the stars therein.
+
+You will need to download the catalog yourself, as it is about 500 megabytes.
+See for instance: http://en.wikipedia.org/wiki/Tycho-2_Catalogue
+
+
+
+Usage:
+  ./procstars -S 6 -m 12 -s 12 -w 32768
+  ./procstars -S 6 -m 12 -s 6 -w 16384
+  ./procstars -c Tycho.cat -o stars.tif
+  ./procstars --help
+
+
+
