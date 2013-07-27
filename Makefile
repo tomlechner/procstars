@@ -21,8 +21,6 @@ LDFLAGS= -L/usr/X11R6/lib -lm  -lGraphicsMagick++
 
 
 #tychomaker: lax
-procstars2: procstars2.cc
-	g++ $(pobjs) procstars2.cc $(LDFLAGS) $(CPPFLAGS) -o $@
 
 procstars: procstars.cc
 	g++ $(pobjs) procstars.cc $(LDFLAGS) $(CPPFLAGS) -o $@
