@@ -13,8 +13,9 @@ is about 500 megabytes.
 For Tycho, you might try:
    http://cdsarc.u-strasbg.fr/viz-bin/Cat?target=http&cat=I%2F259&
 For the PGC, you might try:
-(at the moment, I was using an older PGC (VII_119), need to debug with newer)
-   http://cdsarc.u-strasbg.fr/viz-bin/Cat?VII/237
+   http://cdsarc.u-strasbg.fr/viz-bin/Cat?VII/119
+
+
 
 
 Usage:
@@ -29,3 +30,9 @@ It is written in basic C++. You will need GraphicsMagick development files
 available. Just "make" and run!
 
 
+
+TODO:
+Apparently, there is a newer galaxy catalog, but haven't coded for it yet:
+  http://cdsarc.u-strasbg.fr/viz-bin/Cat?VII/237
+What the heck are those giant red splotches in the sky?? need to approximate
+Fake big things like LMC and SMC?
