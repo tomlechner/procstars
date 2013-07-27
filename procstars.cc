@@ -1,11 +1,27 @@
-// Tycho 2 Star Catalog Image Generator
+// Star Catalog Image Generator
 // By Tom Lechner, tomlechner.com
 // 2013
 //
+// This program creates star globes from the wonderful Tycho2 star catalog,
+// and also the Principal Galaxy Catalog.
 //
-// The bits by Tom Lechner are released with the MIT license.
-// There are other bits adapted from Nathan Bergey's code below,
-// which he released CC Attribution 3.0.
+// Usage:
+//  ./procstars  -c ../Tycho.dat  -w32768  -H 7 -m12 -S 10 -a 40 -g
+//  ./procstars  -c ../Tycho.cat  -S 6 -m 12 -s 12 -w 32768
+//  ./procstars  -c ../Tycho.cat  -S 6 -m 12 -s 6 -w 16384
+//  ./procstars  -c ../Tycho.cat  -o stars.tif
+//
+//
+//
+// This is released with the MIT license.
+// This was first inspired by a generator written by Nathan Bergey from 01-22-2010,
+// which he released CC Attribution 3.0 as Processing code, which processed the 
+// Tycho 2 catalog.
+//
+// Fyi, the ISS takes up about 30 arc seconds.
+// The moon takes up about 30 arc minutes.
+// at 8192 px wide, 23 pixels make 1 degree. 1/3 of a pixel is one arc minute, 1/200 of a pixel is 1 arc second.
+// at 32768,        91 pixels make 1 degree, 1.5 pixels make one arc minute. 
 //
 //
 // The MIT License (MIT)
@@ -32,13 +48,18 @@
 //
 //
 
-//Usage:
-//  ./process-tycho -S 6 -m 12 -s 12 -w 32768
-//  ./process-tycho -S 6 -m 12 -s 6 -w 16384
-//  ./process-tycho -c Tycho.cat -o stars.tif
-//
-//
-//This program creates star globes from the wonderful Tycho2 star catalog.
+
+//Todo:
+//  implement galaxy approximations with principal galaxy catalog's morphology field
+//  project billboard stuff like nebulae, LMC and SMC, M31, space stations, etc
+//  make halo scale with magnitude
+//  find nebula catalog?
+//  what are those huge red smears in the sky??
+//  fake the big galaxies LMC+SMC, m31?
+
+
+
+//Tycho information:
 //
 //Dimmest magnitude:   0
 //Brightest magnitude: 15
@@ -61,12 +82,9 @@
 //  15: 1
 //
 //For the tycho catalog, in principal you can see all the stars in the catalog,
-//but after magnitude of about 12.1, you begin to see striations where the satellite did not scan.
+//but after magnitude of about 12.1, you begin to see what appear to be striations 
+//from where the satellite did not scan.
 //
-//Todo:
-//  blow out big stars, but color the halo
-//  find a galaxy catalog: pgc
-//  project billboard stuff like nebulae, LMC and SMC, M31, space stations, etc
 
 
 
@@ -75,6 +93,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <stdint.h>
 #include <getopt.h>
 
 #include </usr/include/GraphicsMagick/Magick++.h>
@@ -100,9 +119,8 @@ using namespace Magick;
 
 //options:
 const char *filename="stars.tif";
-const char *tycho_file="Tycho.dat";
-int width=8192;
-int height=4096;
+long width=8192;
+long height=4096;
 double magnitude=15.1;
 double maxmagnitude=-5;
 int galactic=0;
@@ -120,8 +138,52 @@ unsigned char *halo=NULL;
 int halowidth=0;
 
 
+//----------------------- Encapsulate a catalog (work in progress) -------------------------
+class RenderContext
+{
+  public:
+	double min_asc;
+	double max_asc;
+	double min_dec;
+	double max_dec;
 
-//forward decs
+	long width;
+	long height;
+	unsigned char *data;
+};
+
+enum CatalogTypes
+{
+	Tycho2,
+	PGC
+};
+
+class Catalog
+{
+  public:
+	char *name;
+	char *filename;
+	CatalogTypes type; //Tycho2, PGC, point cloud (generated far off galaxies), sphere cloud (surrounding earth)
+	
+	int *magnitude_distribution;
+	int nummags;
+	double minimum_magnitude;
+	double maximum_magnitude;
+
+	int min_mag_cutoff;
+	int max_mag_cutoff;
+
+	Catalog(const char *nname, const char *nfile, CatalogTypes ntype);
+	virtual ~Catalog();
+	virtual int Render(RenderContext *context);
+	virtual int GetStats();
+};
+
+
+
+
+
+//------------------------- forward decs -----------------------------
 class flatvector
 {
   public:
@@ -129,31 +191,34 @@ class flatvector
 	flatvector(double xx,double yy) { x=xx; y=yy; }
 };
 flatvector Eq2Gal(float ra, float dec);
-void indexToRgb(float bmag, float vmag, ColorRGB &color);
+void indexToRgb(float index, float vmag, ColorRGB &color);
 double indexToRed(float index);
 double indexToGreen(float index);
 double indexToBlue(float index);
 void drawStar(float ra, float dec, float vmag, float bmag);
 void CreateStockHalo(int w,double halosize, unsigned char *halo);
+double dms(const char *pos);
+double hms(const char *pos);
 
 
 
-Image *stars=NULL;
 
 
 void help()
 {
-	cout << "Tycho 2 Star Catalog Image Generator"<<endl;
+	cout << endl;
+	cout << "Star Catalog Image Generator"<<endl;
 	cout << "By Tom Lechner"<<endl;
 	cout << "Version 0.000000001"<<endl;
-	cout << "\nprocess-tycho [options]\n\n";
+	cout << "\nprocstars [options]\n\n";
 
 	cout << "--width, -w 8192            Width of equirectangular texture image"<<endl;
 	cout << "--output-file, -o file      Filename for generated texture image (will save as tif)"<<endl;
 	cout << "--catalog-file, -c catalog  File containing the Tycho 2 Star Catalog"<<endl;
+	cout << "--pgc-file, -p catalog      File containing the Principal Galaxy Catalog"<<endl;
 	cout << "--magnitude, -m 15.1        Minimum brightness. stars in catalog are 0 (bright)\n"
 			"                              to 15 (very dim). 6 is dimmest to human naked eye."<<endl;
-	cout << "--transparent, -t           Put stars on transparency rather than a black background"<<endl;
+	cout << "--transparent, -T           Put stars on transparency rather than a black background"<<endl;
 	cout << "--maxstarsize, -s 3         Pixels wide of brightest star"<<endl;
 	cout << "--maxstarangle, -a 3        Arc minutes wide of brightest star"<<endl;
 	cout << "--bigthreshhold, -S 4       Magnitude brighter than this gets special size treatment"<<endl;
@@ -167,21 +232,25 @@ void help()
 int main(int argc, char **argv)
 {
 	InitializeMagick(*argv);
-	Image Stars;
-	stars=&Stars;
+
+	const char *tycho_file=NULL;
+	//const char *tycho_file="Tycho.dat";
+	const char *pgc_file=NULL;
+	//const char *pgc_file="Tycho.dat";
 
      // parse options
     static struct option long_options[] = {
             { "width",          1, 0, 'w' },
             { "output-file",    1, 0, 'o' },
             { "catalog-file",   1, 0, 'c' },
+            { "catalog-file",   1, 0, 'p' },
             { "magnitude",      1, 0, 'm' },
             { "maxstarsize",    1, 0, 's' },
             { "maxstarangle",   1, 0, 'a' },
             { "bigthreshhold",  1, 0, 'S' },
             { "galactic",       0, 0, 'g' },
             { "halo",           1, 0, 'H' },
-            { "transparent",    0, 0, 't' },
+            { "transparent",    0, 0, 'T' },
             { "alpha-amp",      1, 0, 'A' },
 			{ "version",        0, 0, 'v' },
             { "help",           0, 0, 'h' },
@@ -191,7 +260,7 @@ int main(int argc, char **argv)
 
 	double ang=-1;
     while (1) {
-        cc=getopt_long(argc,argv,":w:o:c:m:s:S:a:A:H:gtvh",long_options,&index);
+        cc=getopt_long(argc,argv,":w:o:c:p:m:s:S:a:A:H:gTvh",long_options,&index);
         if (cc==-1) break;
         switch(cc) {
             case ':': cerr <<"Missing parameter..."<<endl; exit(1); // missing parameter
@@ -209,6 +278,10 @@ int main(int argc, char **argv)
 				filename=optarg;
               } break;
 
+            case 'p': {
+				pgc_file=optarg;
+              } break;
+
             case 'c': {
 				tycho_file=optarg;
               } break;
@@ -221,7 +294,7 @@ int main(int argc, char **argv)
 				galactic=1;
               } break;
 
-            case 't': {
+            case 'T': {
 				transparent=1;
               } break;
 
@@ -262,20 +335,23 @@ int main(int argc, char **argv)
 	pixelwidth=1./width;
 
 
-	cout << "      Tycho catalog: "<<tycho_file<<endl;
+	cout <<endl;
+	cout << "      Tycho catalog: "<<(tycho_file?tycho_file:"none")<<endl;
+	cout << "     Galaxy catalog: "<<(pgc_file?pgc_file:"none")<<endl;
 	cout << "      Outputting to: "<<filename<<endl;
 	cout << "         Dimensions: "<<width<<" x "<<height<<endl;
 	cout << "Brightness at least: "<<magnitude<<endl;
+	cout << "        Halos after: "<<bigthreshhold<<endl;
 
 
 
 
 
-	unsigned char *ddata=new unsigned char[width*height*4];
+	 //allocate star image data
+	unsigned char *ddata=new unsigned char[(long)width*height*4];
 
 	int stride=width*4;
 	data=ddata;
-	 //init data
 	memset(data,0,width*height*4);
 	if (!transparent) {
 		for (int y=0; y<height; y++) {
@@ -289,15 +365,6 @@ int main(int argc, char **argv)
 	}
 
 
-	//stars->depth(8);
-    //stars->magick("TIFF");
-	//stars->matte(true);
-
-	//char scratch[100];
-	//sprintf(scratch,"%dx%d",width,height);
-	//stars->size(scratch);
-	//if (transparent) stars->read("xc:transparent");
-	//else stars->read("xc:#00000000");
 
 
 
@@ -314,71 +381,144 @@ int main(int argc, char **argv)
 	int magmin=1000, magmax=-1000;
 	memset(mags,0,50*sizeof(int));
 
+	int numstars=0;
+
+
+
+
+	 //--------------- Principal Galaxy Catalog processing -------------------
+	int numgalaxies=0;
+	if (pgc_file) {
+		char *line=NULL;
+		size_t n=0;
+		ssize_t c;
+		FILE *f=fopen(pgc_file,"r");
+		if (!f) {
+			cerr <<" --Fail!-- Could not open Principal Galaxy Catalog: "<<pgc_file<<endl;
+			exit(1);
+		}
+		do {
+
+			c=getline(&line,&n,f);
+			if (c<0) break;
+			if (c==0) continue;
+			if (line[6]== ' ') continue; //no coordinate data on this line
+			if (line[59]==' ') continue; //no magnitude data on this line
+
+			 //the catalog lines are delimited by '|' characters, but also arranged on strict byte widths
+			Ra   = hms(line+6);          // RA hours-min-sec,        bytes 7-14
+			Dec  = dms(line+14);         //DEC degrees-min-sec,      bytes 15-21
+			vmag = strtod(line+59,NULL); //overall visual magnitude, bytes 60-63
+			bmag = vmag+.2; //makes index refer to a slightly blue object
+
+			// *** type of galaxy, bytes 40-43
+			// *** major axis, arcmin, bytes 44-49
+			// *** minor axis, arcmin, bytes 52-56
+			// *** Position Angle from North eastward, bytes 74-76
+		 
+			if (vmag>magnitude || vmag<maxmagnitude) continue;
+			if (Ra==0 && Dec==0) continue;
+
+			if (vmag<magmin) magmin=vmag;
+			if (vmag>magmax) magmax=vmag;
+			mags[int(vmag-magmin)]++;
+
+
+			drawStar(Ra, Dec, vmag, bmag);
+
+			numgalaxies++;
+			if (numgalaxies%10000==0) cout <<"+\n";
+
+		} while (!feof(f));
+		if (line) free(line);
+
+		fclose(f);
+	}
+
+
 
 	 //--------------- Tycho star catalog processing ---------------
-	char *line=NULL;
-	size_t n=0;
-	ssize_t c;
-	FILE *f=fopen(tycho_file,"r");
-	if (!f) {
-		cerr <<" --Fail!-- Could not open Tycho catalog: "<<tycho_file<<endl;
-		exit(1);
+	if (tycho_file) {
+		char *line=NULL;
+		size_t n=0;
+		ssize_t c;
+		FILE *f=fopen(tycho_file,"r");
+		if (!f) {
+			cerr <<" --Fail!-- Could not open Tycho catalog: "<<tycho_file<<endl;
+			exit(1);
+		}
+		do {
+
+			c=getline(&line,&n,f);
+			if (c<0) break;
+			if (c==0) continue;
+
+
+			 //the catalog lines are delimited by '|' characters, but also arranged on strict byte widths
+			Ra   = strtod(line+15,NULL);  //pieces[2],  mRA degrees,   bytes 16-27
+			Dec  = strtod(line+28,NULL);  //pieces[3],  mDE degrees,   bytes 29-40
+			bmag = strtod(line+110,NULL); //pieces[17], BT, tycho 2 blue magnitude,   bytes 111-116
+			vmag = strtod(line+123,NULL); //pieces[19], VT, tycho 2 visual magnitude, bytes 124-129
+		 
+			if (vmag>magnitude || vmag<maxmagnitude) continue;
+			if (Ra==0 && Dec==0) continue;
+
+			if (vmag<magmin) magmin=vmag;
+			if (vmag>magmax) magmax=vmag;
+			mags[int(vmag-magmin)]++;
+
+			 //find stats about colors:
+			//colorindex=bmag-vmag;
+			//if (colorindex<colorindex_min) colorindex_min=colorindex;
+			//if (colorindex>colorindex_max) colorindex_max=colorindex;
+
+
+			drawStar(Ra, Dec, vmag, bmag);
+
+			numstars++;
+			if (numstars%100000==0) cout <<".\n";
+
+		} while (!feof(f));
+		if (line) free(line);
+
+		fclose(f);
 	}
-	int numstars=0;
-	do {
-
-		c=getline(&line,&n,f);
-		if (c<0) break;
-		if (c==0) continue;
 
 
-		 //the catalog lines are delimited by '|' characters, but also arranged on strict byte widths
-        Ra   = strtod(line+15,NULL); //pieces[2],  mRA deglees, bytes 16-27
-        Dec  = strtod(line+28,NULL); //pieces[3],  mDE degrees, bytes 29-40
-        bmag = strtod(line+110,NULL); //pieces[17], BT, tycho 2 blue magnitude,   bytes 111-116
-        vmag = strtod(line+123,NULL); //pieces[19], VT, tycho 2 visual magnitude, bytes 124-129
-     
-		if (vmag>magnitude || vmag<maxmagnitude) continue;
-		if (Ra==0 && Dec==0) continue;
 
-		if (vmag<magmin) magmin=vmag;
-		if (vmag>magmax) magmax=vmag;
-		mags[int(vmag-magmin)]++;
-
-		 //find stats about colors:
-		//colorindex=bmag-vmag;
-		//if (colorindex<colorindex_min) colorindex_min=colorindex;
-		//if (colorindex>colorindex_max) colorindex_max=colorindex;
-
-
-        drawStar(Ra, Dec, vmag, bmag);
-
-		numstars++;
-		if (numstars%100000==0) cout <<".\n";
-
-	} while (!feof(f));
-	if (line) free(line);
-
-	fclose(f);
-
-
-	//--------------- Principal Galaxy Catalog processing -------------------
-	//
-	//
 
 
 
 	//-------------- All done! print summary------------------
 
 	 //statistics
-	cout <<"\nNumber of stars:   "<<numstars<<endl;
-	cout <<"Brightest magnitude: "<<magmin<<endl;
-	cout <<"Dimmest magnitude:   "<<magmax<<endl;
-	//cout <<"Color index range:   "<<colorindex_min<<"..."<<colorindex_max<<endl;
+	cout <<endl;
 	cout <<"Magnitudes:"<<endl;
 	for (int c=magmin; c<=magmax; c++) cout <<"  "<<c<<": "<<mags[c-magmin]<<endl;
+	cout <<endl;
+
+	cout <<"Number of stars:      "<<numstars<<endl;
+	cout <<"Number of galaxies:   "<<numgalaxies<<endl;
+	cout <<"Brightest magnitude:  "<<magmin<<endl;
+	cout <<"Dimmest magnitude:    "<<magmax<<endl;
+	//cout <<"Color index range:   "<<colorindex_min<<"..."<<colorindex_max<<endl;
 
 
+
+	 //copy data over to a gm image for output
+	Image *stars=NULL;
+	Image Stars;
+	stars=&Stars;
+
+	//stars->depth(8);
+    //stars->magick("TIFF");
+	//stars->matte(true);
+
+	//char scratch[100];
+	//sprintf(scratch,"%dx%d",width,height);
+	//stars->size(scratch);
+	//if (transparent) stars->read("xc:transparent");
+	//else stars->read("xc:#00000000");
 
 	stars->compressType(LZWCompression);
 	stars->read(width,height,"RGBA",CharPixel,data);
@@ -389,10 +529,66 @@ int main(int argc, char **argv)
 	stars->write(filename);
 
 
+
 	cout << "Done!"<<endl;
 	return 0;
 }
 
+/*! Return degrees from "246060". PGC uses this.
+ */
+double hms(const char *pos)
+{
+	if (*pos==' ') return 0;
+
+	double v=(*pos-'0')*10;
+	pos++;
+	v+=(*pos-'0');
+	pos++;
+
+	double vv=(*pos-'0')*10;
+	pos++;
+	vv+=(*pos-'0');
+	pos++;
+	v+=vv/60.;
+
+	vv=strtod(pos,NULL); //seconds has decimal
+	v+=vv/3600.;
+
+	v=v/24.*360;
+
+	return v;
+}
+
+/*! Return degrees from "+906060". PGC uses this.
+ */
+double dms(const char *pos)
+{
+	if (*pos==' ') return 0;
+
+	int sgn=1;
+	if (*pos=='+') pos++;
+	else if (*pos=='-') { sgn=-1; pos++; }
+
+	 //degree portion, assume 0..90
+	double v=(*pos-'0')*10;
+	pos++;
+	v+=(*pos-'0');
+	pos++;
+
+	double vv=(*pos-'0')*10;
+	pos++;
+	vv+=(*pos-'0');
+	pos++;
+	v+=vv/60.;
+
+	vv=(*pos-'0')*10; //seconds has NO decimal here
+	pos++;
+	vv+=(*pos-'0');
+	pos++;
+	v+=vv/3600.;
+
+	return v*sgn;
+}
 
 /*! Add color*alpha to pixel at x,y. If pixel has alpha, then make more opaque.
  */
@@ -441,7 +637,7 @@ void point(double x,double y, ColorRGB &color, double span)
 		for (int c=x+width-span/2; c<width; c++) blendPixel(c,y,color); //draw line x+width-span/2, to width
 
 	} else if (x+span/2>width) {
-		 //wraps around to begining
+		 //wraps around to beginning
 		for (int c=0; c<x-width+span/2; c++) blendPixel(c,y,color); //line 0 to x-width+span/2
 		for (int c=x-span/2; c<width; c++) blendPixel(c,y,color); //line x-span/2 to width
 
@@ -457,14 +653,14 @@ void dataEllipse(int xp,int yp, double xr,double yr, ColorRGB &color)
 
 	if (usehalo) {
 		 //may halo reference to data
-		 //rendered on in a very naive way, just rectangular copy
+		 //rendered on in a very naive way, just rectangular copy, no additional span correction
 
 		double oldamp=alphaamp;
 		alphaamp=0;
 
 		ColorRGB col;
 		int i;
-		double a;
+		double a,r,g,b;
 		int sx,sy;
 		int hx,hy;
 
@@ -473,9 +669,9 @@ void dataEllipse(int xp,int yp, double xr,double yr, ColorRGB &color)
 		  for (int x=xp-xr; x<xp+xr; x++) {
 		    sx=x-(xp-xr);
 
-			col.red(color.red());
-			col.green(color.green());
-			col.blue(color.blue());
+			r=color.red();
+			g=color.green();
+			b=color.blue();
 
 			hy=sy/(2.*yr)*halowidth;
 			hx=sx/(2.*xr)*halowidth;
@@ -484,7 +680,17 @@ void dataEllipse(int xp,int yp, double xr,double yr, ColorRGB &color)
 
 			//cerr <<"hx,hy:"<<hx<<','<<hy<<"  i,a:"<<i<<"  "<<a<<endl;
 
-			col.alpha(a*color.alpha());
+			//col.alpha(a*color.alpha());
+			col.alpha(a * (1-.25*color.alpha()));
+			if (a>.5) {
+				r=r*(1-a) + 1*(a);
+				g=g*(1-a) + 1*(a);
+				b=b*(1-a) + 1*(a);
+			}
+			col.red  (r);
+			col.green(g);
+			col.blue (b);
+
 			blendPixel(x,y, col);
 		  }
 		  //cerr <<endl;
@@ -505,7 +711,7 @@ void dataEllipse(int xp,int yp, double xr,double yr, ColorRGB &color)
 
 
 /*! span is how much horizontally to stretch out one pixel.
- * Vertical is not stretched. Not this is not accurate.. ellipses do not actually project into ellipses.
+ * Vertical is not stretched. Note this is not accurate.. ellipses do not actually project into ellipses.
  */
 void ellipse(double x,double y, double xs,double ys, ColorRGB &color, double span)
 {
@@ -517,23 +723,22 @@ void ellipse(double x,double y, double xs,double ys, ColorRGB &color, double spa
 	//if (color.blue()<.4) color.blue(color.red()*.75);
 	//if (color.green()<.4) color.green(color.red()*.75);
 
-	if (usehalo) {
-		xs*=usehalo;
-		ys*=usehalo;
-	}
+//	if (usehalo) {
+//		xs*=usehalo;
+//		ys*=usehalo;
+//	}
 
-	 //xs and ys were diameters
+	 //xs and ys were diameters, convert to radii
 	xs*=span/2; //expand when necessary
 	ys/=2;
-	span=xs;
 
 
-	if (x-xs/2<0) {
+	if (x-xs<0) {
 		 //near 0, draw partial, wraps around to far
 		dataEllipse(x,y, xs,ys, color);
 		dataEllipse(x+width,y, xs,ys, color);
 
-	} else if (x+xs/2>width) {
+	} else if (x+xs>width) {
 		 //near far edge, wraps around to begining
 		dataEllipse(x-width,y, xs,ys, color);
 		dataEllipse(x,y, xs,ys, color);
@@ -544,67 +749,8 @@ void ellipse(double x,double y, double xs,double ys, ColorRGB &color, double spa
 	}
 }
 
-/*! Create a square w x h grayscale image (no alpha), where 0 is transparent, 1 is full opaque.
- * halo size is the ratio of halo diameter to star diameter.
- * These are copied to star map for bigger stars.
- *
- * w must be an even number.
- */
-void CreateStockHalo(int w,double halosize, unsigned char *halodata)
-{
-	double r=w/2/halosize; //radius of main star
-	double r2=r*r;         //square of radius of main star
-	int w2=w*w/4;          //square of halo radius
-	int cx=w/2, cy=w/2;    //center of halo
-	double d2;             //temp, distance of current point to center
-	double hstart=0;       //what radius to start full opaque halo
-	double v;
-
-	for (int y=0; y<w; y++) {
-	  for (int x=0; x<w; x++) {
-		d2=(x-cx)*(x-cx)+(y-cy)*(y-cy); //distance squared of current pixel to center
-
-		if (d2<r2) { //within main star
-			halodata[y*w+x]=255;//totally opaque
-
-		} else if (d2>w2) {
-			halodata[y*w+x]=0;//totally transparent, outside of halo
-
-		} else {
-			//draw halo pixel
-			v=((w/2)-sqrt(d2)-hstart)/(w/2-hstart);
-			//v=v*v;// *** testing different halo types
-			halodata[y*w+x]=constrain(v*255, 0,255);
-		}
-	  }
-	}
 
 
-	Image haloimage;
-	haloimage.read(halowidth,halowidth,"I",CharPixel,halodata);
-    haloimage.magick("PNG");
-	haloimage.write("halo.png");
-}
-
-
-/**
- * The following is adapted from:
- *
- * A short piece of code to read the tycho.dat file which is the combined data 
- * from all the other files
- * Reads each line in the file and prints and image
- *
- * (c) Nathan Bergey 01-22-2010
- * Availible under Creative Commons Attribution 3.0 license.
- */
-
-float an          = radians(32.93192);   // Galactic long of asc node on equator
-float ngpRa       = radians(192.85948);  // RA of North Galactic Pole
-float ngpDec      = radians(27.12825);   // Dec of North Galactic Pole
-float cos_ngpDec  = cos(ngpDec);
-float sin_ngpDec  = sin(ngpDec);
-static float SMALL = 1e-20;
-//PFont font;
 
 
 
@@ -616,7 +762,8 @@ void drawStar(float ra, float dec, float vmag, float bmag)
 {
   float x, y;
   ColorRGB c;
-  indexToRgb(bmag, vmag, c);  // Get a color for the star
+  float index = bmag-vmag;
+  indexToRgb(index, vmag, c);  // Get a color for the star
   //stroke(c);
   //fill(c);
   
@@ -664,6 +811,28 @@ void drawStar(float ra, float dec, float vmag, float bmag)
   }
 }
 
+
+//! Figure out how much one normal pixel is stretched out horizontally torward the poles.
+double GetSpan(int y)
+{
+  double span=1;
+  double dec=180.*(y-height/2)/height;
+  double declination_radians=dec/180.*M_PI;
+  if (declination_radians==M_PI) span=width;
+  else span=1/cos(declination_radians);
+  if (span>width) span=width;
+  return span;
+}
+
+
+//for use in Eq2Gal:
+float an          = radians(32.93192);   // Galactic long of asc node on equator
+float ngpRa       = radians(192.85948);  // RA of North Galactic Pole
+float ngpDec      = radians(27.12825);   // Dec of North Galactic Pole
+float cos_ngpDec  = cos(ngpDec);
+float sin_ngpDec  = sin(ngpDec);
+static float SMALL = 1e-20;
+
 /**
  * Convert Equtorial Coordinates to Galactic Coordinates
  * Based on code from libastro. You are not expected to understand this.
@@ -700,43 +869,6 @@ flatvector Eq2Gal(float ra, float dec)
   return flatvector(degrees(lon_gal), degrees(lat_gal));
 }
 
-///**
-// * Draws a grid and numbers (coordinates) on the screen
-// */
-//void printGrid()
-//{
-//  float x, y;
-//  stroke(100);
-//  strokeWeight(2);
-//  fill(255);
-//  
-//  // x for Equtorial
-//  for(int i = 0; i <= 24; i+= 2)
-//  { 
-//    x = map(i, 0, 24, 0, width);
-//    line(x, 0, x, height);
-//    text(i, x - 60, 50);
-//  }
-//
-//  /* Uncomment for galactic coordinates
-//   *
-//  // x for Galactic
-//  for(int i = -180; i <= 180; i+= 30)
-//  { 
-//    x = map(i, -180, 180, 0, width);
-//    line(x, 0, x, height);
-//    text(i, x - 60, 50);
-//  }
-//  */
-// 
-//  // y
-//  for(int i = -90; i < 90; i += 30)
-//  {
-//    y = map(i, -90, 90, height, 0);
-//    line(0, y, width, y);
-//    text(i, 10, y + 50);
-//  }
-//}
 
 
 
@@ -763,12 +895,16 @@ flatvector Eq2Gal(float ra, float dec)
  *  0.10      8455   #dfe5ff   0.75     5418   #ffeddb   1.40     4159   #ffd8a9
  *  0.15      8084   #e4e9ff   0.80     5286   #ffebd6   1.45     4076   #ffd6a5
  *  0.20      7767   #e9ecff   0.85     5164   #ffe9d2   1.50     3989   #ffd5a1 
+ *
+ * The vmag value is mapped to the alpha of color.
  */
-void indexToRgb(float bmag, float vmag, ColorRGB &color)
+void indexToRgb(float index, float vmag, ColorRGB &color)
 {
-  float index = bmag - vmag;
-  //float bright = map((vmag<bmag?vmag:bmag), 18, -1, 0, 1);
-  float bright = map(vmag, 18, -1, 0, 1);
+  //float bright = map(vmag,  magnitude, -1,  0, 1); //map magnitude range to 0..1
+  float bright = map(vmag,  magnitude, bigthreshhold+.0001,  0, 1); //map magnitude range of point starsto 0..1
+ 
+  //if (vmag>bigthreshhold) cout <<"bright:"<<bright<<endl;
+
   double r = indexToRed(index);
   double g = indexToGreen(index);
   double b = indexToBlue(index);
@@ -836,124 +972,65 @@ double indexToBlue(float index)
   }
 }
 
-//--------------------------------older--------------------------------
-double indexToRed_OLD(float index)
-{  
-  float a = 132.206;
-  float b = 206.618;
-  
-  float r = ((a*index) + b)/255;
-  r = constrain(r, 0, 1);
-  
-  return r;
-}
 
-double indexToGreen_OLD(float index)
-{  
-  if (index < 0.4)
-  {
-    float a = 92.9412;
-    float b = 216.647;
-    float g = ((a*index) + b)/255;
-    g = constrain(g, 0, 1);
-    return g;
-  }
-  else if (index <= 1.5)
-  {
-    float a = -33.7549;
-    float b = 262.957;
-    float g = ((a*index) + b)/255;
-    g = constrain(g, 0, 1);
-    return g;
-  }
-  else
-  {
-    float a = -564.678;
-    float b = 210.636905;
-    float c = 1.55;
-    float g = (a*((index-c)*(index-c)) + b)/255;
-    g = constrain(g, 0, 1);
-    return g;
-  }
-}
-
-double indexToBlue_OLD(float index)
-{  
-  if (index < 1.65)
-  {
-    float a = -84.1162;
-    float b = 284.527;
-    float bl = ((a*index) + b)/255;
-    bl = constrain(bl, 0, 1);
-    return bl;
-  }
-  else
-  {
-    float a = -530.0;
-    float b = 1020.0;
-    float bl = ((a*index) + b)/255;
-    bl= constrain(bl, 0, 1);
-    return bl;
-  }
-}
-
-//-------------toms old:
-
-/*! GraphicsMagick does not seem to apply alpha to pixels, so moving it down here juts for reference...
+/*! Create a square w x h grayscale image (no alpha), where 0 is transparent, 1 is full opaque.
+ * halo size is the ratio of halo diameter to star diameter.
+ * These are copied to star map for bigger stars.
+ *
+ * w must be an even number.
+ *
+ * For debugging, writes out to halo.png.
  */
-void point_gm(double x,double y, ColorRGB &color, double span)
+void CreateStockHalo(int w,double halosize, unsigned char *halodata)
 {
-	if (span<=1) {
-		 //near enough to equator that it is just a single pixel
-		stars->pixelColor(x,y,color);
+	double r=w/2/halosize; //radius of main star
+	double r2=r*r;         //square of radius of main star
+	int w2=w*w/4;          //square of halo radius
+	int cx=w/2, cy=w/2;    //center of halo
+	double d2;             //temp, distance of current point to center
+	double hstart=1;       //what radius to start full opaque halo
+	hstart*=r;
 
-	} else if (x-span/2<0) {
-		 //draw partial, wraps around 
-		for (int c=0; c<x+span/2; c++) stars->pixelColor(c,y,color); //draw line 0 to x+span/2
-		for (int c=x+width-span/2; c<width; c++) stars->pixelColor(c,y,color); //draw line x+width-span/2, to width
+	double v;
 
-	} else if (x+span/2>width) {
-		 //wraps around to begining
-		for (int c=0; c<x-width+span/2; c++) stars->pixelColor(c,y,color); //line 0 to x-width+span/2
-		for (int c=x-span/2; c<width; c++) stars->pixelColor(c,y,color); //line x-span/2 to width
+	for (int y=0; y<w; y++) {
+	  for (int x=0; x<w; x++) {
+		d2=(x-cx)*(x-cx)+(y-cy)*(y-cy); //distance squared of current pixel to center
 
-	} else {
-		 //fits without wraparound
-		for (int c=x-span/2; c<x+span/2; c++) stars->pixelColor(c,y,color); //line x-span/2 to width
+		if (d2<r2) { //within main star
+			halodata[y*w+x]=255;//totally opaque
+
+		} else if (d2<w2) { //within halo
+			//draw halo pixel
+			//v: 1==opaque, 0==transparent
+			v=((w/2) - sqrt(d2)) / (w/2-hstart);
+
+			//halo dropoff..
+			//1. so far it is linear
+
+			//2. maybe v^2
+			//v=v*v;// *** testing different halo types
+
+			//3. sine wave
+			v=constrain(v, 0,1);
+			v=.5+.5*sin((v-.5)*M_PI);
+
+			halodata[y*w+x]=constrain(v*255, 0,255);
+
+		} else  {
+			//totally transparent, outside of halo
+			halodata[y*w+x]=0;
+		}
+
+	  }
 	}
+
+
+	Image haloimage;
+	haloimage.read(halowidth,halowidth,"I",CharPixel,halodata);
+    haloimage.magick("PNG");
+	haloimage.write("halo.png");
 }
 
-void ellipse_gm(double x,double y, double xs,double ys, ColorRGB &color, double span)
-{
-	 //tinker with colors to make more pleasing
-	//color.alpha(0);
-	color.alpha(color.alpha()*.25);
-	//color.red(color.red()*.5);
-	if (color.blue()<.4) color.blue(color.red()*.95);
-	if (color.green()<.4) color.green(color.red()*.95);
 
-
-	xs*=span; //expand when necessary
-	stars->fillColor(color);
-	stars->strokeWidth(0);
-	stars->strokeColor(color);
-
-	span=xs;
-
-
-	if (x-xs/2<0) {
-		 //near 0, draw partial, wraps around to far
-		stars->draw(DrawableEllipse(x,y, xs,ys, 0,360));
-		stars->draw(DrawableEllipse(x+width,y, xs,ys, 0,360));
-
-	} else if (x+xs/2>width) {
-		 //near far edge, wraps around to begining
-		stars->draw(DrawableEllipse(x-width,y, xs,ys, 0,360));
-		stars->draw(DrawableEllipse(x,y, xs,ys, 0,360));
-
-	} else {
-		 //fits without wraparound
-		stars->draw(DrawableEllipse(x,y, xs,ys, 0,360));
-	}
-}
 

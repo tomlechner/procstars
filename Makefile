@@ -1,28 +1,31 @@
 #################################################
 ##############                    ###############
-#############  Tycho Generator     ##############
+#############      Procstars       ##############
 ##############                    ###############
 #################################################
 
 
-LAXDIR=/home/tom/other/p/sourceforge/laxkit/lax
 
 BINDIR=$(PREFIX)/bin
 
 
 LD=g++
-CPPFLAGS= -Wall -g -I. -I.. -I$(LAXDIR)/.. -I$(LAXIDIR) -I/usr/include/freetype2 -I/usr/include/GraphicsMagick/
-LDFLAGS= -L/usr/X11R6/lib -lX11 -lftgl -lm -lpng -lcrypto -lGraphicsMagick++ `imlib2-config --libs` -L$(LAXDIR) -L$(LAXIDIR) -lXft -lXi
+#CPPFLAGS= -Wall -g -I. -I.. -I$(LAXDIR)/.. -I$(LAXIDIR) -I/usr/include/freetype2 -I/usr/include/GraphicsMagick/
+#LDFLAGS= -L/usr/X11R6/lib -lX11 -lftgl -lm -lpng -lcrypto -lGraphicsMagick++ `imlib2-config --libs` -L$(LAXDIR) -L$(LAXIDIR) -lXft -lXi
 
 
+CPPFLAGS= -Wall -g -I.  -I/usr/include/GraphicsMagick/
+LDFLAGS= -L/usr/X11R6/lib -lm  -lGraphicsMagick++ 
 
 
 
 
 #tychomaker: lax
-process-tycho: process-tycho.cc
-	g++ $(pobjs) process-tycho.cc $(LDFLAGS) $(CPPFLAGS) -o $@
-	#g++ $(pobjs) process-tycho.o -llaxinterfaces -llaxkit $(TUIOLIBS) $(LDFLAGS) -lGL -lGLU $(CPPFLAGS) -o $@
+procstars2: procstars2.cc
+	g++ $(pobjs) procstars2.cc $(LDFLAGS) $(CPPFLAGS) -o $@
+
+procstars: procstars.cc
+	g++ $(pobjs) procstars.cc $(LDFLAGS) $(CPPFLAGS) -o $@
 
 test: test.cc
 	g++ $(pobjs) test.cc $(LDFLAGS) $(CPPFLAGS) -o $@
