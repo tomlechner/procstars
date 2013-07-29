@@ -21,10 +21,14 @@
 // Tycho 2 catalog.
 //
 //
-// Fyi, the ISS takes up about 30 arc seconds.
-// The moon takes up about 30 arc minutes.
-// at 8192 px wide, 23 pixels make 1 degree. 1/3 of a pixel is one arc minute, 1/200 of a pixel is 1 arc second.
-// at 32768,        91 pixels make 1 degree, 1.5 pixels make one arc minute. 
+// Fyi:
+// At 8192 px wide, 23 pixels make 1 degree. 1/3 of a pixel is one arc minute, 1/200 of a pixel is 1 arc second.
+// At 32768,        91 pixels make 1 degree, 1.5 pixels make one arc minute. 
+// A typical human can discerne down to about 1 arcminute.
+// the ISS takes up about 30 arc seconds, and is max about -5.9 in magnitude
+// The moon takes up about 30 arc minutes, and is about magnitude -12.74
+// The sun is about magnitude -26.74, and takes up about 32 arc minutes.
+// The dimmest objects observed so far in human visible wavelengths is about magnitude 36.
 //
 //
 //
@@ -75,12 +79,16 @@
 #include <lax/laxoptions.h>
 #include <lax/rowframe.h>
 #include <lax/laxutils.h>
+#include <lax/buttondowninfo.h>
 
 #include </usr/include/GraphicsMagick/Magick++.h>
 
 #include <lax/laxoptions.h>
 #include <lax/anxapp.h>
 #include <lax/curvewindow.h>
+//#include <lax/iconselector.h>
+#include <lax/button.h>
+#include <lax/lineinput.h>
 #include <lax/strmanip.h>
 
 #include "catalogs.h"
@@ -113,6 +121,186 @@ using namespace LaxFiles;
 
 
 
+//--------------------------------- HaloWindow ---------------------------------
+/*! \class HaloWindow
+ * Control window for adjusting map of star color index to rgb color.
+ */
+class HaloWindow : public Laxkit::RowFrame
+{
+  public:
+	RenderContext *context;
+	LaxImage *halo;
+	CurveWindow *blowout, *ramp;
+	ButtonDownInfo buttondown;
+	
+
+	HaloWindow(RenderContext *cntxt);
+	virtual ~HaloWindow();
+	virtual int init();
+	virtual void Refresh();
+	virtual int Event(const EventData *e,const char *mes);
+	virtual void Reset(int which=~0);
+	virtual int LBDown(int x,int y,unsigned int state,int count,const LaxMouse *d);
+    virtual int LBUp(int x,int y,unsigned int state,const LaxMouse *d);
+	virtual int MouseMove(int x,int y,unsigned int state,const LaxMouse *d);
+
+	virtual void UpdateHalo();
+};
+
+HaloWindow::HaloWindow(RenderContext *cntxt)
+  : RowFrame(NULL,"Halo Window","Halo Window",ROWFRAME_ROWS|ANXWIN_DOUBLEBUFFER, 0,310,600,250,0, NULL,0,"update")
+{
+	context=cntxt;
+	halo=create_new_image(150,150);
+}
+
+HaloWindow::~HaloWindow()
+{
+}
+
+int HaloWindow::LBDown(int x,int y,unsigned int state,int count,const LaxMouse *d)
+{
+	int xx=wholelist.e[0]->x();
+	int yy=wholelist.e[0]->y();
+	int ww=wholelist.e[0]->w()-2*pad;
+	int hh=wholelist.e[0]->h()-2*pad;
+
+	if (x>xx && x<xx+ww && y>yy && y<yy+hh) {
+		if (x<xx+ww/2) buttondown.down(d->id, LEFTBUTTON, x,y, -1);
+		else buttondown.down(d->id, LEFTBUTTON, x,y, 1);
+	}
+
+	return 0;
+}
+
+int HaloWindow::LBUp(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	buttondown.up(d->id, LEFTBUTTON);
+	return 0;
+}
+
+int HaloWindow::MouseMove(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	if (!buttondown.any()) return 0;
+	int ox,oy;
+	buttondown.move(d->id, x,y, &ox,&oy);
+
+	int xx=wholelist.e[0]->x();
+	int yy=wholelist.e[0]->y();
+	int ww=wholelist.e[0]->w()-2*pad;
+	int hh=wholelist.e[0]->h()-2*pad;
+	ox-=xx+ww/2;
+	oy-=yy+hh/2;
+	x-=xx+ww/2;
+	y-=yy+hh/2;
+	
+	double od=sqrt(ox*ox+oy*oy);
+	double nd=sqrt(x*x+y*y);
+
+	context->usehalo=(context->usehalo-1)*od/nd + 1;
+	UpdateHalo();
+	needtodraw=1;
+	return 0;
+}
+
+void HaloWindow::UpdateHalo()
+{
+	ramp->GetInfo()->RefreshLookup(256, 0,255);
+	blowout->GetInfo()->RefreshLookup(256, 0,255);
+	
+	unsigned char *data=halo->getImageBuffer();
+	int w=halo->w();
+
+	CreateStockHalo(w, context->usehalo, data, "c", ramp->GetInfo(),blowout->GetInfo());
+	halo->doneWithBuffer(data);
+
+	needtodraw=1;
+}
+
+int HaloWindow::init()
+{
+	anXWindow *last=NULL;
+
+	CurveWindow *win=NULL;
+	
+	//AddSpacer(75,25,50,50,  200,100,200,50, -1); //file info
+	AddSpacer(200,100,200,50,  200,100,200,50, -1); //preview area
+
+
+	last=win=ramp=new CurveWindow(NULL,"Ramp","Ramp",0, 5,5,500,500,0, last,object_id,"ramp",
+						 			 "Halo Ramp", "radius",0,1,  "a",0,255);
+	//radius->AddPoint(.7,255); // *** or whatever halostart is
+	ramp->GetInfo()->curvetype=CurveInfo::Autosmooth;
+	context->ramp=ramp->GetInfo();
+	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
+
+
+	last=win=blowout=new CurveWindow(NULL,"Blowout","Blowout",0, 5,5,500,500,0, last,object_id,"blowout",
+							"Halo Blowout", "opacity",0,1,  "color",0,1);
+	context->blowout=blowout->GetInfo();
+	blowout->GetInfo()->curvetype=CurveInfo::Autosmooth;
+	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
+
+	UpdateHalo();
+
+
+	last->CloseControlLoop();
+	Sync(1);
+	return 0;
+}
+
+/*! Reset to default colors.
+ * which is &1 for red, &2 for green, &4 for blue
+ */
+void HaloWindow::Reset(int which)
+{
+	if (which&1) {
+		//radius->AddPoint(.7,255); // *** or whatever halostart is
+		ramp->Reset();
+	}
+
+	if (which&2) {
+		blowout->Reset();
+	}
+
+	needtodraw=1;
+}
+
+void HaloWindow::Refresh()
+{
+	if (!needtodraw) return;
+	if (arrangedstate!=1) Sync(0);
+
+	int pad=10;
+	int w=wholelist.e[0]->w()-2*pad;
+	int h=wholelist.e[0]->h()-2*pad;
+	//double pos, r,g,b;
+
+	if (h<w) w=h;
+	foreground_color(0);
+	fill_rectangle(this,pad,pad,w,h);
+	image_out_skewed(halo, this, pad,pad, w,0, 0,w);
+
+	SwapBuffers();
+	needtodraw=0;
+}
+
+int HaloWindow::Event(const EventData *e,const char *mes)
+{
+	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
+	if (!m) return anXWindow::Event(e,mes);
+
+	if (!strcmp(mes,"ramp") || !strcmp(mes,"blowout")) {
+		UpdateHalo();
+	}
+
+	needtodraw=1;
+	return 0;
+}
+
+
+
+
 //--------------------------------- IndexWindow ---------------------------------
 /*! \class IndexWindow
  * Control window for adjusting map of star color index to rgb color.
@@ -120,14 +308,10 @@ using namespace LaxFiles;
 class IndexWindow : public Laxkit::RowFrame
 {
   public:
-	int numsamples;
-	int maxsamplevalue;
-	int *lookup_r;
-	int *lookup_g;
-	int *lookup_b;
-
+	RenderContext *context;
 	CurveWindow *rr,*gg,*bb;
-	IndexWindow();
+
+	IndexWindow(RenderContext *cntxt);
 	virtual ~IndexWindow();
 	virtual int init();
 	virtual void Refresh();
@@ -135,19 +319,14 @@ class IndexWindow : public Laxkit::RowFrame
 	virtual void Reset(int which=~0);
 };
 
-IndexWindow::IndexWindow()
-  : RowFrame(NULL,"Index Window","Index Window",ANXWIN_ESCAPABLE|ROWFRAME_ROWS, 0,0,600,300,0, NULL,0,NULL)
+IndexWindow::IndexWindow(RenderContext *cntxt)
+  : RowFrame(NULL,"Index Window","Index Window",ROWFRAME_ROWS, 0,0,600,250,0, NULL,0,"update")
 {
-	lookup_r=lookup_g=lookup_b=NULL;
-	numsamples=0;
-	maxsamplevalue=255;
+	context=cntxt;
 }
 
 IndexWindow::~IndexWindow()
 {
-	if (lookup_r) delete[] lookup_r;
-	if (lookup_g) delete[] lookup_g;
-	if (lookup_b) delete[] lookup_b;
 }
 
 int IndexWindow::init()
@@ -156,32 +335,39 @@ int IndexWindow::init()
 
 	CurveWindow *win=NULL;
 	
-	AddSpacer(75,25,50,50,  200,100,200,50, -1);
+	AddSpacer(75,25,50,50,  200,150,200,50, -1);
 
 
 	last=win=rr=new CurveWindow(NULL,"Red","Red",0, 5,5,500,500,0, last,object_id,"red",
 						 			 "Red", "B-V",-0.5,2,  "r",0,255);
+	context->index_r=rr->GetInfo();
+	rr->GetInfo()->curvetype=CurveInfo::Autosmooth;
 	rr->AddPoint(.4,255);
-	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
+	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
 	last=win=gg=new CurveWindow(NULL,"Green","Green",0, 5,5,500,500,0, last,object_id,"green",
 							"Green", "B-V",-0.5,2,  "g",0,255);
+	context->index_g=gg->GetInfo();
+	gg->GetInfo()->curvetype=CurveInfo::Autosmooth;
 	gg->MovePoint(0, -.5,170);
 	gg->MovePoint(1, 2,0);
 	gg->AddPoint(.4,255);
 	gg->AddPoint(1.7,200);
-	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
+	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
 	last=win=bb=new CurveWindow(NULL,"Blue","Blue",0, 5,5,500,500,0, last,object_id,"blue",
 							"Blue", "B-V",-0.5,2, "b",0,255);
+	context->index_b=bb->GetInfo();
+	bb->GetInfo()->curvetype=CurveInfo::Autosmooth;
 	bb->MovePoint(0, -.5,255);
 	bb->MovePoint(1, 2,0);
 	bb->AddPoint(.5,255);
 	bb->AddPoint(1.7,150);
-	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
+	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
+	Reset(~0);
 
 	last->CloseControlLoop();
 	Sync(1);
@@ -195,6 +381,7 @@ void IndexWindow::Reset(int which)
 {
 	if (which&1) {
 		rr->Reset();
+		rr->AddPoint(.25,230);
 		rr->AddPoint(.4,255);
 	}
 
@@ -222,7 +409,7 @@ void IndexWindow::Refresh()
 	if (!needtodraw) return;
 	if (arrangedstate!=1) Sync(0);
 
-	int pad=10;
+	int pad=20;
 	int w=wholelist.e[0]->w()-2*pad;
 	int h=wholelist.e[0]->h()-2*pad;
 	double pos, r,g,b;
@@ -250,7 +437,249 @@ int IndexWindow::Event(const EventData *e,const char *mes)
 }
 
 
+//--------------------------------- SizeWindow ---------------------------------
+/*! \class SizeWindow
+ * Control window for adjusting sizes of stars.
+ */
+class SizeWindow : public Laxkit::RowFrame
+{
+  public:
+	RenderContext *context;
 
+	//CurveWindow *rr,*gg,*bb;
+	SizeWindow(RenderContext *rr);
+	virtual ~SizeWindow();
+	virtual int init();
+	virtual void Refresh();
+	virtual int Event(const EventData *e,const char *mes);
+	virtual void Reset(int which=~0);
+};
+
+SizeWindow::SizeWindow(RenderContext *rr)
+  : RowFrame(NULL,"Size Window","Size Window",ROWFRAME_ROWS, 0,0,600,250,0, NULL,0,"update")
+{
+	context=rr;
+}
+
+SizeWindow::~SizeWindow()
+{
+}
+
+int SizeWindow::init()
+{
+	anXWindow *last=NULL;
+
+	CurveWindow *win=NULL;
+	
+	AddSpacer(75,25,50,50,  200,150,200,50, -1); //*** for range selector
+
+
+	last=win=new CurveWindow(NULL,"Large","Large",0, 5,5,500,500,0, last,object_id,"large",
+						 			 "Big star scale", "magnitude",context->bigthreshhold,context->maximum_magnitude, "px",0,30);
+	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
+
+
+	last=win=new CurveWindow(NULL,"Points","Points",0, 5,5,500,500,0, last,object_id,"points",
+							"Point Opacity", "mag",context->minimum_magnitude,context->bigthreshhold,  "a",0,1);
+	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
+
+
+	last=win=new CurveWindow(NULL,"Point Amp","Point Amp",0, 5,5,500,500,0, last,object_id,"pointamp",
+							"Point Amp", "mag",context->minimum_magnitude,context->bigthreshhold, "a",0,1);
+	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+	win->MovePoint(1, 0,0);
+	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
+
+
+	last->CloseControlLoop();
+	Sync(1);
+	return 0;
+}
+
+/*! Reset to default colors.
+ * which is &1 for red, &2 for green, &4 for blue
+ */
+void SizeWindow::Reset(int which)
+{
+	if (which&1) {
+	}
+	needtodraw=1;
+}
+
+void SizeWindow::Refresh()
+{
+	if (!needtodraw) return;
+	if (arrangedstate!=1) Sync(0);
+
+	needtodraw=0;
+}
+
+int SizeWindow::Event(const EventData *e,const char *mes)
+{
+	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
+	if (!m) return anXWindow::Event(e,mes);
+
+	needtodraw=1;
+	return 0;
+}
+
+
+
+
+//--------------------------------- MainWindow ---------------------------------
+/*! \class MainWindow
+ */
+class MainWindow : public Laxkit::RowFrame
+{
+  public:
+	int firsttime;
+
+	RandomCatalog previewcatalog;
+	LaxImage *preview;
+
+	HaloWindow *halowindow;
+
+	RenderContext *context;
+	MainWindow(RenderContext *rr);
+	virtual ~MainWindow() {}
+	virtual int init();
+	virtual void Refresh();
+	virtual int Event(const EventData *e,const char *mes);
+	//virtual void Reset(int which=~0);
+	virtual void UpdatePreview();
+};
+
+MainWindow::MainWindow(RenderContext *rr)
+  : RowFrame(NULL,"Main Window","Main Window",ANXWIN_ESCAPABLE|ROWFRAME_ROWS, 500,0,600,900,0, NULL,0,NULL),
+	previewcatalog("preview",1000)
+{
+	context=rr;
+	preview=NULL;
+	firsttime=2;
+}
+
+int MainWindow::init()
+{
+	anXWindow *last=NULL;
+
+	AddSpacer(1000,2005,1000,50,  400,200,200,50, -1); //area for preview image
+	AddNull();
+
+
+	//  Save To: ____ [...]    <<RENDER NOW>>    Save Settings To: ______[...] [load]
+	LineInput *file;
+	last=file=new LineInput(this, "File","File",0, 0,0,0,0,0, NULL,object_id,"file","Render To:","stars#.tif");
+	AddWin(file,1, file->win_w,0,300,50,0, file->win_h,0,10,50,0, -1);
+
+	Button *button;
+	last=button=new Button(this, "Render","Render",0, 0,0,0,0,0, last,object_id,"render",0, " Render now! ");
+	button->gap=button->win_w*.25;
+	AddWin(button,1, button->win_w,0,300,50,0, button->win_h,0,10,50,0, -1);
+
+	last=file=new LineInput(this, "Save Settings","Save Settings",0, 0,0,0,0,0, last,object_id,"settings","Project:","");
+	AddWin(file,1, file->win_w,0,300,50,0, file->win_h,0,10,50,0, -1);
+
+	AddNull();
+
+
+	 //-----editing windows:
+
+	SizeWindow *swin=new SizeWindow(context);
+	AddWin(swin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
+
+	IndexWindow *iwin=new IndexWindow(context);
+	AddWin(iwin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
+
+	halowindow=new HaloWindow(context);
+	AddWin(halowindow,1, 800,400,200,50,0,  200,150,200,50,0, -1);
+
+	//CatalogWindow *catwin=new CatalogWindow();
+	//AddWin(catwin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
+
+
+
+	last->CloseControlLoop();
+	Sync(1);
+	return 0;
+}
+
+int MainWindow::Event(const EventData *e,const char *mes)
+{
+	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
+	if (!m) return anXWindow::Event(e,mes);
+
+	if (!strcmp(mes,"render")) {
+		cout <<"Render..."<<endl;
+		return 0;
+	}
+
+	if (!strcmp(mes,"update")) {
+		needtodraw=1;
+		return 0;
+	}
+
+	return anXWindow::Event(e,mes);
+}
+
+void MainWindow::UpdatePreview()
+{
+	if (!context->halo) {
+		halowindow->UpdateHalo();
+		if (!context->halo) {
+			context->halowidth=context->maxstarsize*context->usehalo;
+			context->halo=new unsigned char[context->halowidth*context->halowidth];
+		}
+		CreateStockHalo(context->halowidth, context->usehalo, context->halo, "g",
+						context->ramp,context->blowout);
+	}
+
+	int ww=wholelist.e[0]->w();
+	int hh=wholelist.e[0]->h();
+
+	if (!preview) {
+		preview=create_new_image(ww,hh);
+	}
+
+	unsigned char *data=preview->getImageBuffer();
+	ww=preview->w();
+	hh=preview->h();
+	memset(data,0,ww*hh*4);
+	for (int x=0; x<ww; x++) {
+	  for (int y=0; y<hh; y++) {
+		data[(y*ww+x)*4+3]=255;
+	  }
+	}
+
+	previewcatalog.Render(context, data,ww,hh);
+	preview->doneWithBuffer(data);
+}
+
+void MainWindow::Refresh()
+{
+	if (!needtodraw) return;
+	if (arrangedstate!=1) Sync(0);
+
+	if (firsttime>0) {
+		firsttime--;
+		return;
+	}
+
+
+	needtodraw=0;
+
+	int xx=wholelist.e[0]->x();
+	int yy=wholelist.e[0]->y();
+	int ww=wholelist.e[0]->w();
+	int hh=wholelist.e[0]->h();
+
+	if (!preview) {
+		UpdatePreview();
+	}
+
+	image_out_skewed(preview, this, xx,yy, ww,0, 0,hh);
+}
 
 //--------------------------------- main() --------------------------------
 
@@ -387,8 +816,6 @@ int main(int argc, char **argv)
 	}
 	if (rr.usehalo>1) {
 		rr.halowidth=rr.maxstarsize*rr.usehalo;
-		rr.halo=new unsigned char[rr.halowidth*rr.halowidth];
-		CreateStockHalo(rr.halowidth, rr.usehalo, rr.halo);
 	}
 
 
@@ -413,9 +840,10 @@ int main(int argc, char **argv)
 
 	 //------set up windows...
 	anXApp app;
+	makestr(app.app_profile,"Dark");
 	app.init(argc,argv);
 
-	app.addwindow(new IndexWindow());
+	app.addwindow(new MainWindow(&rr));
 	
 
 	 //...and off we go!
@@ -430,87 +858,6 @@ int main(int argc, char **argv)
 
 } //main()
 
-
-
-
-void ExportStarImage(RenderContext *rr)
-{
-
-
-
-
-	 //-----allocate star image data
-	unsigned char *ddata=new unsigned char[(long)rr->width*rr->height*4];
-
-	int stride=rr->width*4;
-	rr->data=ddata;
-	memset(rr->data,0,rr->width*rr->height*4);
-	if (!rr->transparent) {
-		for (int y=0; y<rr->height; y++) {
-		  for (int x=0; x<rr->width; x++) {
-			//data[y*stride+x*4+0]=255;
-			//data[y*stride+x*4+1]=255;
-			//data[y*stride+x*4+2]=255;
-			rr->data[y*stride+x*4+3]=255;//opaque
-		  }
-		}
-	}
-
-
-
-
-
-	//-------------- print summary ------------------
-
-
-	int mags[50];
-	int magmin=1000, magmax=-1000;
-	memset(mags,0,50*sizeof(int));
-	int numstars=0;
-	int numgalaxies=0;
-
-
-	 //statistics
-	cout <<endl;
-	cout <<"Magnitudes:"<<endl;
-	for (int c=magmin; c<=magmax; c++) cout <<"  "<<c<<": "<<mags[c-magmin]<<endl;
-	cout <<endl;
-
-	cout <<"Number of stars:      "<<numstars<<endl;
-	cout <<"Number of galaxies:   "<<numgalaxies<<endl;
-	cout <<"Brightest magnitude:  "<<magmin<<endl;
-	cout <<"Dimmest magnitude:    "<<magmax<<endl;
-	//cout <<"Color index range:   "<<colorindex_min<<"..."<<colorindex_max<<endl;
-
-
-
-	 //copy data over to a gm image for output
-	Image *stars=NULL;
-	Image Stars;
-	stars=&Stars;
-
-	//stars->depth(8);
-    //stars->magick("TIFF");
-	//stars->matte(true);
-
-	//char scratch[100];
-	//sprintf(scratch,"%dx%d",width,height);
-	//stars->size(scratch);
-	//if (transparent) stars->read("xc:transparent");
-	//else stars->read("xc:#00000000");
-
-	stars->compressType(LZWCompression);
-	stars->read(rr->width,rr->height,"RGBA",CharPixel,rr->data);
-    stars->magick("TIFF");
-
-
-	cout <<"Writing to "<<rr->filename<<"..."<<endl;
-	stars->write(rr->filename);
-
-
-	cout << "Done!"<<endl;
-	return;
-}
 
 
 

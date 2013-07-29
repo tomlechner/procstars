@@ -5,28 +5,44 @@
 #################################################
 
 
+#--for both command line only, and gui versions:
+GRAPHICSMAGICKDIR=/usr/include/GraphicsMagick/
 
-BINDIR=$(PREFIX)/bin
+
+#---for gui version:
+FREETYPEDIR=/usr/include/freetype2
+LAXDIR=./laxkit/lax
+
+
+
+
+#--------- hopefully you don't have to mess with anything below ----------
 
 
 LD=g++
-#CPPFLAGS= -Wall -g -I. -I.. -I$(LAXDIR)/.. -I$(LAXIDIR) -I/usr/include/freetype2 -I/usr/include/GraphicsMagick/
-#LDFLAGS= -L/usr/X11R6/lib -lX11 -lftgl -lm -lpng -lcrypto -lGraphicsMagick++ `imlib2-config --libs` -L$(LAXDIR) -L$(LAXIDIR) -lXft -lXi
+
+LAXCPPFLAGS= -Wall -g -I. -I.. -I$(LAXDIR)/.. -I$(FREETYPEDIR) 
+LAXLDFLAGS= -L/usr/X11R6/lib -lX11 -lftgl -lm -lpng -lcrypto -lcairo `imlib2-config --libs`  -lXft -lXi -L$(LAXDIR) 
 
 
-CPPFLAGS= -Wall -g -I.  -I/usr/include/GraphicsMagick/
+CPPFLAGS= $(LAXCPPFLAGS) -Wall -g -I.  -I$(GRAPHICSMAGICKDIR)
 LDFLAGS= -L/usr/X11R6/lib -lm  -lGraphicsMagick++ 
 
 
 
 
-#tychomaker: lax
 
 procstars: procstars.cc
-	g++ $(pobjs) procstars.cc $(LDFLAGS) $(CPPFLAGS) -o $@
+	g++ procstars.cc $(LDFLAGS) $(CPPFLAGS) -o $@
+
+galaxymaker: galaxymaker.cc
+	g++ $@.cc $(LDFLAGS) $(CPPFLAGS) -o $@
+
+procstars-gui: lax catalogs.o procstars-gui.o
+	g++  $(LDFLAGS) $(LAXLDFLAGS) $@.o catalogs.o -llaxkit $(CPPFLAGS)  -o $@
 
 test: test.cc
-	g++ $(pobjs) test.cc $(LDFLAGS) $(CPPFLAGS) -o $@
+	g++  test.cc $(LDFLAGS) $(CPPFLAGS) -o $@
 
 lax:
 	cd $(LAXDIR) && $(MAKE)
@@ -36,15 +52,15 @@ laxinterface:
 	cd $(LAXDIR)/interfaces && $(MAKE)
 
 
-#depends:
-#	makedepend -fmakedepend -I$(LAXDIR)/.. -Y *.cc
-#
-#include makedepend
+depends:
+	makedepend -fmakedepend -I$(LAXDIR)/.. -Y *.cc
+
+include makedepend
 
 
 
 
-.PHONY: clean lax laxinterface
+.PHONY: clean lax laxinterface depends
 clean:
-	rm -f tycho *.o
+	rm -f procstars-gui procstars *.o
 

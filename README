@@ -17,6 +17,7 @@ For the PGC, you might try:
 
 
 
+------------------ Procstars, command line version ------------------------
 
 Usage:
   ./procstars -S 6 -m 12 -s 12 -w 32768
@@ -26,12 +27,46 @@ Usage:
 
 
 
-It is written in basic C++. You will need GraphicsMagick development files
-available. Just "make" and run!
+It is written in plain old C++, and is contained all in procstars.cc.
+You will need GraphicsMagick development files available. That will
+be something like:
+  sudo apt-get install libgraphicsmagick++1-dev
+
+Compiling is supposed to be easy, but you might have to modify where some 
+header files are in the Makefile.
+
+When you are ready:
+  make depends
+  make
+...and run!
 
 
 
-TODO:
+------------------------- Procstars-gui ---------------------------
+
+Procstars-gui currently uses the Laxkit for gui elements. You will have to 
+download the Laxkit seperately.
+
+To do so, you need to do a couple of things.
+First, make sure build dependencies are present:
+  sudo apt-get install g++ pkg-config libgraphicsmagick++1-dev libpng12-dev libx11-dev libxi-dev libxft-dev libcups2-dev libimlib2-dev libfontconfig-dev libfreetype6-dev libssl-dev xutils-dev
+
+Next, from this directory:
+  svn co svn://svn.code.sf.net/p/laxkit/code/laxkit/trunk laxkit
+  cd laxkit
+  ./configure
+  make depends
+  make
+  cd ..
+
+Now you should be able to simply do:
+  make procstars-gui
+
+...and run!
+
+
+
+--------------------------- TODO ----------------------------------
 Apparently, there is a newer galaxy catalog, but haven't coded for it yet:
   http://cdsarc.u-strasbg.fr/viz-bin/Cat?VII/237
 What the heck are those giant red splotches in the sky?? need to approximate

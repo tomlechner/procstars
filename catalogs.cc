@@ -27,6 +27,8 @@ using namespace Magick;
 #define radians(deg) (deg/180.*M_PI)
 #define degrees(rad) (rad*180./M_PI)
 
+ //integer color average
+#define AVG(a,b, r) ((a*r+b*(255-r))/255)
 
 
 //------------------------------- RenderContext -----------------------------------
@@ -38,6 +40,15 @@ using namespace Magick;
 
 RenderContext::RenderContext()
 {
+	 //curve objects:
+	ramp=NULL;
+	blowout=NULL;
+	index_r=NULL;
+	index_g=NULL;
+	index_b=NULL;
+
+
+	projectfile=NULL;
 	filename   =newstr("stars.tif");
 	width      =8192;
 	height     =4096;
@@ -51,12 +62,125 @@ RenderContext::RenderContext()
 	bigthreshhold=4; //magnitude < this get big treatment
 	alphaamp     =0;
 
-	usehalo  =0;
+	usehalo  =5;
 	halo     =NULL;
 	halowidth=0;
 
 	data=NULL;
 	catalog=NULL;
+}
+
+
+//------------------------------- Random Catalog for previewing mainly -----------------------------------
+
+
+/*! \class RandomCatalog
+ * Collection of stars in memory for previewing.
+ */
+RandomCatalog::RandomCatalog(const char *nname, int num)
+  : Catalog(nname,NULL,RandomMemory)
+{
+	if (num<=0) num=1000;
+	numpoints=num;
+	color_index=new double[numpoints];
+	color_mag  =new double[numpoints];
+	asc        =new double[numpoints];
+	dec        =new double[numpoints];
+
+	Repopulate(numpoints,0);
+}
+
+//! Convert cartesian space to spherical surface. (radians)
+void rect_to_sphere(double x,double y,double z, double *asc,double *dec)
+{
+	*asc=atan2(y,x);
+	*dec=atan(z/sqrt(x*x+y*y));
+}
+
+int RandomCatalog::Repopulate(int num, int spherical)
+{
+	if (num>numpoints) {
+		numpoints=num;
+		delete[] color_index;
+		delete[] color_mag;
+		delete[] asc;
+		delete[] dec;
+		color_index=new double[numpoints];
+		color_mag  =new double[numpoints];
+		asc        =new double[numpoints];
+		dec        =new double[numpoints];
+	}
+
+	double x,y,z;
+	for (int c=0; c<numpoints; c++) {
+		color_index[c]=drand48()*(2.5)-.5;
+		color_mag[c]  =drand48()*(15);
+		
+		 //create random point in unit cube, map to sphere..
+		 //creates even distribution compared to just random asc/dec
+		if (spherical) {
+			x=drand48();
+			y=drand48();
+			z=drand48();
+
+			if (x==0 && y==0 && z==0) x=1;
+			rect_to_sphere(x,y,z, &asc[c], &dec[c]);
+			asc[c]/=2*M_PI; //convert to unit range
+			if (asc[c]<0) asc[c]+=.5;
+			dec[c]/=M_PI/2; //convert to unit range
+			if (dec[c]<0) dec[c]+=.5;
+
+		} else {
+			 //for simple rectilinear:
+			asc[c]=drand48();
+			dec[c]=drand48();
+		}
+	}
+
+	return numpoints;
+}
+
+int RandomCatalog::Render(RenderContext *context)
+{
+	return 1;
+}
+
+int RandomCatalog::Render(RenderContext *context, unsigned char *data,int ww,int hh)
+{
+    double Ra;   //right ascension (longitude)
+    double Dec;  //declination (latitude)
+    double vmag; //visual mag
+    double index;//blue mag
+
+
+	 //preempt to draw on provided surface
+	unsigned char *olddata=context->data;
+	int oldw=context->width;
+	int oldh=context->height;
+
+	context->data  =data;
+	context->width =ww;
+	context->height=hh;
+
+	for (int c=0; c<numpoints; c++) {
+
+		vmag  = color_mag[c];
+		index = color_index[c];
+		Ra    = asc[c];
+	 	Dec   = dec[c];
+
+		if (vmag>context->minimum_magnitude || vmag<context->maximum_magnitude) continue;
+
+		drawStarSimple(context, Ra, Dec, index, vmag);
+	}
+
+
+	 //restore actual surface
+	context->data  =olddata;
+	context->width =oldw;
+	context->height=oldh;  
+
+	return 0;
 }
 
 
@@ -69,8 +193,8 @@ RenderContext::RenderContext()
 
 Catalog::Catalog(const char *nname, const char *nfile, CatalogTypes ntype)
 {
-	makestr(name,nname);
-	makestr(filename,nfile);
+	name=newstr(nname);
+	filename=newstr(nfile);
 	type=ntype;
 
 	min_mag_cutoff=max_mag_cutoff=0;
@@ -398,10 +522,17 @@ void blendPixel(RenderContext *context, int x,int y, StarColor &color)
 	b+=bb; if (b>255) b=255;
 	a+=aa; if (a>255) a=255;
 
+	//context->data[i  ]=r;
+	//context->data[i+1]=g;
+	//context->data[i+2]=b;
+	//context->data[i+3]=a;
+
 	context->data[i  ]=r;
 	context->data[i+1]=g;
 	context->data[i+2]=b;
-	context->data[i+3]=a;
+	context->data[i+3]=255;
+
+	cerr <<"blend "<<x<<','<<y<<endl;
 }
 
 void point(RenderContext *rr, double x,double y, StarColor &color, double span)
@@ -532,6 +663,41 @@ void ellipse(RenderContext *rr, double x,double y, double xs,double ys, StarColo
 
 
 
+/**
+ * This draws a pixel or small circle to the screen, in a simple rectilinear way.
+ * ra and dec are assumed to be in range 0..1.
+ */
+void drawStarSimple(RenderContext *rr, double ra, double dec, double index, double vmag)
+{
+  double x, y;
+  StarColor c;
+  indexToRgb(rr, index, vmag, c);  // Get a color for the star
+  //stroke(c);
+  //fill(c);
+  
+  // map to screen coordinates
+  x = map(ra,  0, 1,     0,   rr->width);
+  y = map(dec, 0, 1, rr->height, 0);
+
+  //cout <<"x:"<<x<<"  y:"<<y<<endl;
+  
+  
+   //figure out how much the star is stretched out in final image
+  double span=1;
+
+
+  // For bright stars draw a cicle, otherwise just a pixel
+  if (vmag < rr->bigthreshhold)
+  {
+    float s = map(vmag, rr->bigthreshhold, -1, 2, rr->maxstarsize);
+	ellipse(rr, x, y, s, s,  c, span);
+  }
+  else
+  {
+	point(rr, x, y, c, span);
+  }
+}
+
 
 
 /**
@@ -658,7 +824,8 @@ flatvector Eq2Gal(float ra, float dec)
  *
  * For debugging, writes out to halo.png.
  */
-void CreateStockHalo(int w,double halosize, unsigned char *halodata)
+void CreateStockHalo(int w,double halosize, unsigned char *halodata,
+					 const char *format, Laxkit::CurveInfo *ramp, Laxkit::CurveInfo *blowout)
 {
 	double r=w/2/halosize; //radius of main star
 	double r2=r*r;         //square of radius of main star
@@ -668,45 +835,70 @@ void CreateStockHalo(int w,double halosize, unsigned char *halodata)
 	double hstart=1;       //what radius to start full opaque halo
 	hstart*=r;
 
+	int i;
 	double v;
+	int vv;
+	int usecolor=(*format!='g');
+	int col_b=255;
+	int col_g=0;
+	int col_r=0;
 
 	for (int y=0; y<w; y++) {
 	  for (int x=0; x<w; x++) {
+		if (*format=='g') i=y*w+x; else i=4*(y*w+x);
+
 		d2=(x-cx)*(x-cx)+(y-cy)*(y-cy); //distance squared of current pixel to center
 
 		if (d2<r2) { //within main star
-			halodata[y*w+x]=255;//totally opaque
+			if (usecolor) {
+				vv=ramp->lookup[255];
+				halodata[i+0]=AVG(255,col_b, blowout->lookup[vv]); //b
+				halodata[i+1]=AVG(255,col_g, blowout->lookup[vv]); //g
+				halodata[i+2]=AVG(255,col_r, blowout->lookup[vv]);//r
+				halodata[i+3]=vv; //a
+			} else {
+				halodata[i]=ramp->lookup[255];//totally opaque
+			}
 
 		} else if (d2<w2) { //within halo
 			//draw halo pixel
 			//v: 1==opaque, 0==transparent
 			v=((w/2) - sqrt(d2)) / (w/2-hstart);
 
-			//halo dropoff..
-			//1. so far it is linear
+			//map to sine wave ---> using curve ramp now
+			//v=constrain(v, 0,1);
+			//v=.5+.5*sin((v-.5)*M_PI);
 
-			//2. maybe v^2
-			//v=v*v;// *** testing different halo types
-
-			//3. sine wave
-			v=constrain(v, 0,1);
-			v=.5+.5*sin((v-.5)*M_PI);
-
-			halodata[y*w+x]=constrain(v*255, 0,255);
+			if (usecolor) {
+				vv=ramp->lookup[constrain(int(v*255), 0,255)];
+				halodata[i+0]=AVG(255,col_b, blowout->lookup[vv]); //b
+				halodata[i+1]=AVG(255,col_g, blowout->lookup[vv]); //g
+				halodata[i+2]=AVG(255,col_r, blowout->lookup[vv]);//r
+				halodata[i+3]=vv;
+				//halodata[i+3]=ramp->lookup[vv];
+			} else {
+				halodata[i]=ramp->lookup[constrain(int(v*255), 0,255)];
+			}
 
 		} else  {
 			//totally transparent, outside of halo
-			halodata[y*w+x]=0;
+			if (usecolor) {
+				halodata[i+0]=0;
+				halodata[i+1]=halodata[i+2]=halodata[i+3]=0;
+			} else {
+				halodata[i]=0;
+			}
 		}
 
 	  }
 	}
 
 
-	Image haloimage;
-	haloimage.read(w,w,"I",CharPixel,halodata);
-    haloimage.magick("PNG");
-	haloimage.write("halo.png");
+	//Image haloimage;
+	//if (usecolor) haloimage.read(w,w,"ARGB",CharPixel,halodata);
+	//else haloimage.read(w,w,"I",CharPixel,halodata);
+    //haloimage.magick("PNG");
+	//haloimage.write("halo.png");
 }
 
 
@@ -809,4 +1001,101 @@ double indexToBlue(float index)
     return bl;
   }
 }
+
+
+
+//----------------------------- Actual Render and Export Function --------------------
+
+
+int Render(RenderContext *context)
+{
+
+	 //create halo image if necessary
+	if (!context->halo) {
+		context->halowidth=context->maxstarsize*context->usehalo;
+		context->halo=new unsigned char[context->halowidth*context->halowidth];
+		CreateStockHalo(context->halowidth, context->usehalo, context->halo, "g",
+						context->ramp,context->blowout);
+	}
+
+
+	 //-----allocate star image data
+	unsigned char *ddata=new unsigned char[(long)context->width*context->height*4];
+
+	int stride=context->width*4;
+	context->data=ddata;
+	memset(context->data,0,context->width*context->height*4);
+	if (!context->transparent) {
+		for (int y=0; y<context->height; y++) {
+		  for (int x=0; x<context->width; x++) {
+			//data[y*stride+x*4+0]=255;
+			//data[y*stride+x*4+1]=255;
+			//data[y*stride+x*4+2]=255;
+			context->data[y*stride+x*4+3]=255;//opaque
+		  }
+		}
+	}
+
+
+	 //Render the stack of catalogs
+	for (int c=0; c<context->catalogs.n; c++) {
+		context->catalog=context->catalogs.e[c];
+		context->catalog->Render(context);
+	}
+
+
+
+
+	int mags[50];
+	int magmin=1000, magmax=-1000;
+	memset(mags,0,50*sizeof(int));
+	int numstars=0;
+	int numgalaxies=0;
+
+
+	//-------------- print summary ------------------
+	 //statistics
+	cout <<endl;
+	cout <<"Magnitudes:"<<endl;
+	for (int c=magmin; c<=magmax; c++) cout <<"  "<<c<<": "<<mags[c-magmin]<<endl;
+	cout <<endl;
+
+	cout <<"Number of stars:      "<<numstars<<endl;
+	cout <<"Number of galaxies:   "<<numgalaxies<<endl;
+	cout <<"Brightest magnitude:  "<<magmin<<endl;
+	cout <<"Dimmest magnitude:    "<<magmax<<endl;
+	//cout <<"Color index range:   "<<colorindex_min<<"..."<<colorindex_max<<endl;
+
+
+
+	 //copy data over to a gm image for output
+	Image *stars=NULL;
+	Image Stars;
+	stars=&Stars;
+
+	//stars->depth(8);
+    //stars->magick("TIFF");
+	//stars->matte(true);
+
+	//char scratch[100];
+	//sprintf(scratch,"%dx%d",width,height);
+	//stars->size(scratch);
+	//if (transparent) stars->read("xc:transparent");
+	//else stars->read("xc:#00000000");
+
+	stars->compressType(LZWCompression);
+	stars->read(context->width,context->height,"RGBA",CharPixel,context->data);
+    stars->magick("TIFF");
+
+
+	cout <<"Writing to "<<context->filename<<"..."<<endl;
+	stars->write(context->filename);
+
+
+	cout << "Done!"<<endl;
+
+	return 0;
+}
+
+
 

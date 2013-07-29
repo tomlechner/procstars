@@ -8,6 +8,7 @@
 
 #include <lax/lists.h>
 #include <lax/vectors.h>
+#include <lax/curvewindow.h>
 
 
 
@@ -32,6 +33,7 @@ class Catalog;
 class RenderContext
 {
   public:
+	char *projectfile; //save settings here
 	char *filename; //final stars file
 	long width;
 	long height;
@@ -48,6 +50,12 @@ class RenderContext
 	double usehalo;
 	unsigned char *halo;
 	int halowidth; //width in pixels of halo image
+
+	Laxkit::CurveInfo *ramp;
+	Laxkit::CurveInfo *blowout;
+	Laxkit::CurveInfo *index_r;
+	Laxkit::CurveInfo *index_g;
+	Laxkit::CurveInfo *index_b;
 
 	double min_asc;
 	double max_asc;
@@ -103,6 +111,21 @@ class Catalog
 	virtual int CloseCatalog();
 };
 
+class RandomCatalog : public Catalog
+{
+  public:
+	int numpoints;
+	double *color_index;
+	double *color_mag;
+	double *asc;
+	double *dec;
+
+	RandomCatalog(const char *nname, int num);
+	virtual int Render(RenderContext *context);
+	virtual int Render(RenderContext *context, unsigned char *data,int ww,int hh);
+
+	virtual int Repopulate(int num, int spherical);
+};
 
 //------------------------------- Rendering Misc -----------------------------------
 
@@ -112,11 +135,12 @@ double indexToRed(float index);
 double indexToGreen(float index);
 double indexToBlue(float index);
 void drawStar(RenderContext *rr, float ra, float dec, float vmag, float bmag);
-void CreateStockHalo(int w,double halosize, unsigned char *halo);
+void drawStarSimple(RenderContext *rr, double ra, double dec, double index, double vmag);
+void CreateStockHalo(int w,double halosize, unsigned char *halo, const char *format, Laxkit::CurveInfo *ramp, Laxkit::CurveInfo *blowout);
 double dms(const char *pos);
 double hms(const char *pos);
 
-
+int Render(RenderContext *context);
 int Process_PGC(RenderContext *context);
 int Process_Tycho(RenderContext *context);
 
