@@ -17,20 +17,31 @@ class StarColor
 {
   public:
 	int r,g,b,a;
-	double red() { return r; }
-	void red(double rr) { r=rr; }
-	double green() { return g; }
-	void green(double gg) { g=gg; }
-	double blue() { return b; }
-	void blue(double bb) { b=bb; }
-	double alpha() { return a; }
-	void alpha(double aa) { a=aa; }
+	int    red () { return r; }
+	double redf() { return r/255.; }
+	void   redf(double rr) { r=rr*255; }
+	void   red (int rr)    { r=rr; }
+
+	int    green () { return g; }
+	double greenf() { return g/255.; }
+	void   greenf(double gg) { g=gg*255; }
+	void   green (int gg)    { g=gg; }
+
+	int    blue () { return b; }
+	double bluef() { return b/255.; }
+	void   bluef(double bb) { b=bb*255; }
+	void   blue (int bb)    { b=bb; }
+
+	int    alpha () { return a; }
+	double alphaf() { return a/255.; }
+	void   alphaf(double aa) { a=aa*255; }
+	void   alpha (int aa)    { a=aa; }
 };
 
 //------------------------------- RenderContext -----------------------------------
 class Catalog;
 
-class RenderContext
+class RenderContext : public LaxFiles::DumpUtility
 {
   public:
 	char *projectfile; //save settings here
@@ -45,7 +56,6 @@ class RenderContext
 	double maxmagnitude;
 	double maxstarsize; //pixels of biggest star
 	double bigthreshhold; //magnitude < this get big treatment
-	double alphaamp;
 
 	double usehalo;
 	unsigned char *halo;
@@ -56,6 +66,8 @@ class RenderContext
 	Laxkit::CurveInfo *index_r;
 	Laxkit::CurveInfo *index_g;
 	Laxkit::CurveInfo *index_b;
+	Laxkit::CurveInfo *bigscale;
+	Laxkit::CurveInfo *pointopacity;
 
 	double min_asc;
 	double max_asc;
@@ -70,6 +82,10 @@ class RenderContext
 	Catalog *catalog; //current
 
 	RenderContext();
+
+	virtual void dump_out(FILE *f,int indent,int what,Laxkit::anObject *context);
+    virtual LaxFiles::Attribute *dump_out_atts(LaxFiles::Attribute *att,int what,Laxkit::anObject *context);
+    virtual void dump_in_atts(LaxFiles::Attribute *att,int flag,Laxkit::anObject *context);
 };
 
 
@@ -129,14 +145,12 @@ class RandomCatalog : public Catalog
 
 //------------------------------- Rendering Misc -----------------------------------
 
-flatvector Eq2Gal(float ra, float dec);
-void indexToRgb(RenderContext *rr, float index, float vmag, StarColor &color);
-double indexToRed(float index);
-double indexToGreen(float index);
-double indexToBlue(float index);
-void drawStar(RenderContext *rr, float ra, float dec, float vmag, float bmag);
-void drawStarSimple(RenderContext *rr, double ra, double dec, double index, double vmag);
-void CreateStockHalo(int w,double halosize, unsigned char *halo, const char *format, Laxkit::CurveInfo *ramp, Laxkit::CurveInfo *blowout);
+flatvector Eq2Gal(double ra, double dec);
+void indexToRgb(RenderContext *rr, double index, double vmag, StarColor &color);
+void drawStar(RenderContext *rr, double ra, double dec, double vmag, double bmag);
+void drawStarSimple(RenderContext *context, double ra, double dec, double index, double vmag);
+void CreateStockHalo(int w,double halosize, unsigned char *halo, const char *format,
+					 Laxkit::CurveInfo *ramp, Laxkit::CurveInfo *blowout, const char *saveto);
 double dms(const char *pos);
 double hms(const char *pos);
 

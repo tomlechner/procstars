@@ -104,6 +104,7 @@
 #define degrees(rad) (rad*180./M_PI)
 
 
+#define DBG
 
 using namespace std;
 using namespace Magick;
@@ -145,6 +146,7 @@ class HaloWindow : public Laxkit::RowFrame
 	virtual int MouseMove(int x,int y,unsigned int state,const LaxMouse *d);
 
 	virtual void UpdateHalo();
+	virtual void send();
 };
 
 HaloWindow::HaloWindow(RenderContext *cntxt)
@@ -198,23 +200,11 @@ int HaloWindow::MouseMove(int x,int y,unsigned int state,const LaxMouse *d)
 	double nd=sqrt(x*x+y*y);
 
 	context->usehalo=(context->usehalo-1)*od/nd + 1;
+	if (context->usehalo<1.0001) context->usehalo=1.0001; //otherwise occasional mysterious glitches
 	UpdateHalo();
+	send();
 	needtodraw=1;
 	return 0;
-}
-
-void HaloWindow::UpdateHalo()
-{
-	ramp->GetInfo()->RefreshLookup(256, 0,255);
-	blowout->GetInfo()->RefreshLookup(256, 0,255);
-	
-	unsigned char *data=halo->getImageBuffer();
-	int w=halo->w();
-
-	CreateStockHalo(w, context->usehalo, data, "c", ramp->GetInfo(),blowout->GetInfo());
-	halo->doneWithBuffer(data);
-
-	needtodraw=1;
 }
 
 int HaloWindow::init()
@@ -285,6 +275,30 @@ void HaloWindow::Refresh()
 	needtodraw=0;
 }
 
+void HaloWindow::send()
+{
+    if (win_owner) {
+        SimpleMessage *ev=new SimpleMessage;
+        app->SendMessage(ev,win_owner,win_sendthis,object_id);
+    }
+}
+
+void HaloWindow::UpdateHalo()
+{
+	ramp->GetInfo()->RefreshLookup(256, 0,255);
+	blowout->GetInfo()->RefreshLookup(256, 0,255);
+	blowout->GetInfo()->LookupDump("blowout",stdout); // ***dbg
+	
+	unsigned char *data=halo->getImageBuffer();
+	int w=halo->w();
+
+	//CreateStockHalo(w, context->usehalo, data, "c", ramp->GetInfo(),blowout->GetInfo(),"halo.png");
+	CreateStockHalo(w, context->usehalo, data, "c", ramp->GetInfo(),blowout->GetInfo(),NULL);
+	halo->doneWithBuffer(data);
+
+	needtodraw=1;
+}
+
 int HaloWindow::Event(const EventData *e,const char *mes)
 {
 	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
@@ -292,6 +306,7 @@ int HaloWindow::Event(const EventData *e,const char *mes)
 
 	if (!strcmp(mes,"ramp") || !strcmp(mes,"blowout")) {
 		UpdateHalo();
+		send();
 	}
 
 	needtodraw=1;
@@ -317,6 +332,8 @@ class IndexWindow : public Laxkit::RowFrame
 	virtual void Refresh();
 	virtual int Event(const EventData *e,const char *mes);
 	virtual void Reset(int which=~0);
+	virtual void UpdateIndex();
+	virtual void send();
 };
 
 IndexWindow::IndexWindow(RenderContext *cntxt)
@@ -401,6 +418,8 @@ void IndexWindow::Reset(int which)
 		bb->AddPoint(1.7,150);
 	}
 
+	UpdateIndex();
+
 	needtodraw=1;
 }
 
@@ -414,11 +433,24 @@ void IndexWindow::Refresh()
 	int h=wholelist.e[0]->h()-2*pad;
 	double pos, r,g,b;
 
+	StarColor color;
 	for (int c=0; c<h; c++) {
-		pos=(double)c/(h-1)*(2.4)-.4;
-		r=rr->f(pos)/255;
-		g=gg->f(pos)/255;
-		b=bb->f(pos)/255;
+		pos=(double)c/(h-1)*(2.5)-.5;
+
+		//------
+		indexToRgb(context,pos,0, color);
+		r=color.redf();
+		g=color.greenf();
+		b=color.bluef();
+		//------
+		//pos=(double)c/(h-1)*255;
+		//r=rr->GetInfo()->lookup[(int)pos]/255.;
+		//g=gg->GetInfo()->lookup[(int)pos]/255.;
+		//b=bb->GetInfo()->lookup[(int)pos]/255.;
+		//------
+		//r=rr->f(pos)/255;
+		//g=gg->f(pos)/255;
+		//b=bb->f(pos)/255;
 
 		foreground_color(r,g,b);
 		draw_line(this, pad,pad+c, pad+w,pad+c);
@@ -427,10 +459,29 @@ void IndexWindow::Refresh()
 	needtodraw=0;
 }
 
+void IndexWindow::send()
+{
+    if (win_owner) {
+        SimpleMessage *ev=new SimpleMessage;
+        app->SendMessage(ev,win_owner,win_sendthis,object_id);
+    }
+}
+
+void IndexWindow::UpdateIndex()
+{
+	rr->GetInfo()->RefreshLookup(256, 0,255);
+	gg->GetInfo()->RefreshLookup(256, 0,255);
+	bb->GetInfo()->RefreshLookup(256, 0,255);
+}
+
 int IndexWindow::Event(const EventData *e,const char *mes)
 {
 	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
 	if (!m) return anXWindow::Event(e,mes);
+
+	if (!strcmp(mes,"red") || !strcmp(mes,"green") || !strcmp(mes,"blue")) {
+		send();
+	}
 
 	needtodraw=1;
 	return 0;
@@ -446,19 +497,23 @@ class SizeWindow : public Laxkit::RowFrame
   public:
 	RenderContext *context;
 
-	//CurveWindow *rr,*gg,*bb;
+	CurveWindow *bigscale,*pointopacity;
 	SizeWindow(RenderContext *rr);
 	virtual ~SizeWindow();
 	virtual int init();
 	virtual void Refresh();
 	virtual int Event(const EventData *e,const char *mes);
 	virtual void Reset(int which=~0);
+	virtual void UpdateSize();
+	virtual void send(const char *mes=NULL);
 };
 
 SizeWindow::SizeWindow(RenderContext *rr)
   : RowFrame(NULL,"Size Window","Size Window",ROWFRAME_ROWS, 0,0,600,250,0, NULL,0,"update")
 {
 	context=rr;
+	bigscale=NULL;
+	pointopacity=NULL;
 }
 
 SizeWindow::~SizeWindow()
@@ -474,24 +529,30 @@ int SizeWindow::init()
 	AddSpacer(75,25,50,50,  200,150,200,50, -1); //*** for range selector
 
 
-	last=win=new CurveWindow(NULL,"Large","Large",0, 5,5,500,500,0, last,object_id,"large",
-						 			 "Big star scale", "magnitude",context->bigthreshhold,context->maximum_magnitude, "px",0,30);
+	last=win=bigscale=new CurveWindow(NULL,"Large","Large",0, 5,5,500,500,0, last,object_id,"large",
+						 			 "Big star scale", "magnitude",context->bigthreshhold,-1, "px",1,100);
+	bigscale->editable=CurveWindow::YMax|CurveWindow::YUnits;
+	bigscale->GetInfo()->MovePoint(1, context->maximum_magnitude,context->maxstarsize);
+	context->bigscale=bigscale->GetInfo();
 	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
-	last=win=new CurveWindow(NULL,"Points","Points",0, 5,5,500,500,0, last,object_id,"points",
+	last=win=pointopacity=new CurveWindow(NULL,"Points","Points",0, 5,5,500,500,0, last,object_id,"points",
 							"Point Opacity", "mag",context->minimum_magnitude,context->bigthreshhold,  "a",0,1);
+	context->pointopacity=pointopacity->GetInfo();
 	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
-	last=win=new CurveWindow(NULL,"Point Amp","Point Amp",0, 5,5,500,500,0, last,object_id,"pointamp",
-							"Point Amp", "mag",context->minimum_magnitude,context->bigthreshhold, "a",0,1);
-	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
-	win->MovePoint(1, 0,0);
-	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
+//	last=win=pointamp=new CurveWindow(NULL,"Point Amp","Point Amp",0, 5,5,500,500,0, last,object_id,"pointamp",
+//							"Point Amp", "mag",context->minimum_magnitude,context->bigthreshhold, "a",0,1);
+//	context->pointamp=pointamp->GetInfo();
+//	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+//	win->MovePoint(1, 0,0);
+//	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
+	UpdateSize();
 
 	last->CloseControlLoop();
 	Sync(1);
@@ -516,10 +577,34 @@ void SizeWindow::Refresh()
 	needtodraw=0;
 }
 
+void SizeWindow::send(const char *mes)
+{
+    if (win_owner) {
+        SimpleMessage *ev=new SimpleMessage;
+        app->SendMessage(ev,win_owner,mes?mes:win_sendthis,object_id);
+    }
+}
+
+void SizeWindow::UpdateSize()
+{
+	bigscale    ->GetInfo()->RefreshLookup(256, 1,bigscale->GetInfo()->ymax);
+	pointopacity->GetInfo()->RefreshLookup(256, 0,255);
+}
+
 int SizeWindow::Event(const EventData *e,const char *mes)
 {
 	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
 	if (!m) return anXWindow::Event(e,mes);
+
+	if (!strcmp(mes,"large") || !strcmp(mes,"points")) {
+		UpdateSize();
+		send();
+	}
+
+	if (!strcmp(mes,"large")) {
+		send("large");
+	}
+
 
 	needtodraw=1;
 	return 0;
@@ -536,8 +621,10 @@ class MainWindow : public Laxkit::RowFrame
   public:
 	int firsttime;
 
+	int numstars;
 	RandomCatalog previewcatalog;
 	LaxImage *preview;
+	int needtoupdate;
 
 	HaloWindow *halowindow;
 
@@ -549,15 +636,34 @@ class MainWindow : public Laxkit::RowFrame
 	virtual int Event(const EventData *e,const char *mes);
 	//virtual void Reset(int which=~0);
 	virtual void UpdatePreview();
+
+    virtual int LBUp(int x,int y,unsigned int state,const LaxMouse *d);
 };
 
 MainWindow::MainWindow(RenderContext *rr)
   : RowFrame(NULL,"Main Window","Main Window",ANXWIN_ESCAPABLE|ROWFRAME_ROWS, 500,0,600,900,0, NULL,0,NULL),
 	previewcatalog("preview",1000)
 {
+	numstars=1000;
 	context=rr;
 	preview=NULL;
 	firsttime=2;
+	needtoupdate=1;
+}
+
+int MainWindow::LBUp(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	if (x<win_w/3) numstars*=.6;
+	else if (x>win_w*2/3) numstars*=1.3;
+	if (numstars<100) numstars=100;
+
+	cerr <<"Regenerate "<<numstars<<"stars..."<<endl;
+
+
+	previewcatalog.Repopulate(numstars,0);
+	UpdatePreview();
+	needtodraw=1;
+	return 0;
 }
 
 int MainWindow::init()
@@ -587,12 +693,15 @@ int MainWindow::init()
 	 //-----editing windows:
 
 	SizeWindow *swin=new SizeWindow(context);
+	swin->SetOwner(this);
 	AddWin(swin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
 
 	IndexWindow *iwin=new IndexWindow(context);
+	iwin->SetOwner(this);
 	AddWin(iwin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
 
 	halowindow=new HaloWindow(context);
+	halowindow->SetOwner(this);
 	AddWin(halowindow,1, 800,400,200,50,0,  200,150,200,50,0, -1);
 
 	//CatalogWindow *catwin=new CatalogWindow();
@@ -615,7 +724,13 @@ int MainWindow::Event(const EventData *e,const char *mes)
 		return 0;
 	}
 
+	if (!strcmp(mes,"large")) {
+		 //max star size changed, need to update halo sample
+		//halowindow->***;
+	}
+
 	if (!strcmp(mes,"update")) {
+		needtoupdate=1;
 		needtodraw=1;
 		return 0;
 	}
@@ -625,19 +740,31 @@ int MainWindow::Event(const EventData *e,const char *mes)
 
 void MainWindow::UpdatePreview()
 {
+	cerr <<"Updating preview..."<<endl;
+
+	if (context->halo && context->halowidth<context->maxstarsize*context->usehalo) {
+		 //star size was changed, we need to make a different size halo
+		cerr << "Resizing halo sample size.."<<endl;
+		delete[] context->halo;
+		context->halo=NULL;
+	}
 	if (!context->halo) {
 		halowindow->UpdateHalo();
 		if (!context->halo) {
-			context->halowidth=context->maxstarsize*context->usehalo;
+			context->halowidth=2*context->maxstarsize*context->usehalo;
 			context->halo=new unsigned char[context->halowidth*context->halowidth];
 		}
-		CreateStockHalo(context->halowidth, context->usehalo, context->halo, "g",
-						context->ramp,context->blowout);
 	}
+	CreateStockHalo(context->halowidth, context->usehalo, context->halo, "g",
+					context->ramp,context->blowout,"halo.png");
 
 	int ww=wholelist.e[0]->w();
 	int hh=wholelist.e[0]->h();
 
+	if (preview && (ww!=preview->w() || hh!=preview->h())) {
+		preview->dec_count();
+		preview=NULL;
+	}
 	if (!preview) {
 		preview=create_new_image(ww,hh);
 	}
@@ -674,8 +801,9 @@ void MainWindow::Refresh()
 	int ww=wholelist.e[0]->w();
 	int hh=wholelist.e[0]->h();
 
-	if (!preview) {
+	if (!preview || needtoupdate) {
 		UpdatePreview();
+		needtoupdate=0;
 	}
 
 	image_out_skewed(preview, this, xx,yy, ww,0, 0,hh);
@@ -739,6 +867,7 @@ int main(int argc, char **argv)
 	const char *tycho_file=NULL;
 	const char *pgc_file=NULL;
 	double ang=-1;
+	double alphaamp=0;
 
 
     LaxOption *o;
@@ -804,7 +933,8 @@ int main(int argc, char **argv)
               } break;
 
             case 'A': {
-				rr.alphaamp=strtod(o->arg(),NULL);
+				alphaamp=strtod(o->arg(),NULL);
+				cerr <<" *** need to implement putting on base alphaamp to point amp curve:"<<alphaamp<<endl;
               } break;
 
 		}
