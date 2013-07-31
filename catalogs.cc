@@ -41,28 +41,24 @@ using namespace Magick;
 
 RenderContext::RenderContext()
 {
-	 //curve objects:
-	ramp=NULL;
-	blowout=NULL;
-	index_r=NULL;
-	index_g=NULL;
-	index_b=NULL;
-	bigscale=NULL;
-	pointopacity=NULL;
 
-
-	projectfile=NULL;
+	projectfile=newstr("save.stars");
 	filename   =newstr("stars.tif");
 	width      =8192;
 	height     =4096;
 	galactic   =0;
 	transparent=0;
 
-	maximum_magnitude=-5;
-	minimum_magnitude=15.1;
 
 	maxstarsize  =20; //pixels of biggest star
 	bigthreshhold=6; //magnitude < this get big treatment
+	maximum_magnitude=-1;
+	minimum_magnitude=18;
+
+	min_asc=0;
+	max_asc=360;
+	min_dec=-90;
+	max_dec=90;
 
 	usehalo  =5;
 	halo     =NULL;
@@ -70,6 +66,66 @@ RenderContext::RenderContext()
 
 	data=NULL;
 	catalog=NULL;
+
+	 //curve objects:
+	ramp        =new CurveInfo("Halo Ramp", "radius",0,1,  "a",0,255);
+	blowout     =new CurveInfo("Halo Blowout", "opacity",0,1,  "color",0,1);
+	index_r     =new CurveInfo("Red", "B-V",-0.5,2,  "r",0,255);
+	index_g     =new CurveInfo("Green", "B-V",-0.5,2,  "g",0,255);
+	index_b     =new CurveInfo("Blue", "B-V",-0.5,2, "b",0,255);
+	bigscale    =new CurveInfo("Big star scale", "magnitude",bigthreshhold,-1, "px",1,50);
+	pointopacity=new CurveInfo("Point Opacity", "mag",minimum_magnitude,bigthreshhold, "a",0,1);
+
+	Reset(~0);
+}
+
+RenderContext::~RenderContext()
+{
+	if (projectfile) delete[] projectfile;
+	if (filename) delete[] filename;
+
+	ramp        ->dec_count();
+	blowout     ->dec_count();
+	index_r     ->dec_count();
+	index_g     ->dec_count();
+	index_b     ->dec_count();
+	bigscale    ->dec_count();
+	pointopacity->dec_count();
+}
+
+void RenderContext::Reset(int which)
+{
+
+	if (which&POINTOPACITY) pointopacity->Reset();
+	if (which&BIGSCALE) {
+		bigscale->Reset();
+		bigscale->MovePoint(1, 1,20);
+	}
+
+	if (which&RAMP) ramp->Reset();
+	if (which&BLOWOUT) blowout->Reset();
+
+	if (which&INDEX_R) {
+		index_r->Reset();
+		index_r->AddPoint(.25,230);
+		index_r->AddPoint(.4,255);
+	}
+
+	if (which&INDEX_G) {
+		index_g->Reset();
+		index_g->MovePoint(0, -.5,170);
+		index_g->MovePoint(1, 2,0);
+		index_g->AddPoint(.4,255);
+		index_g->AddPoint(1.7,200);
+	}
+
+	if (which&INDEX_B) {
+		index_b->Reset();
+		index_b->MovePoint(0, -.5,255);
+		index_b->MovePoint(1, 2,0);
+		index_b->AddPoint(.5,255);
+		index_b->AddPoint(1.7,150);
+	}
 }
 
 void RenderContext::dump_out(FILE *f,int indent,int what,anObject *context)
@@ -92,12 +148,13 @@ LaxFiles::Attribute *RenderContext::dump_out_atts(LaxFiles::Attribute *att,int w
 	att->push("width", width,-1);
 	att->push("height",height,-1);
 
-	att->push("principal_galaxy_catalog","***");
-	att->push("tycho_2_star_catalog","***");
+	//att->push("principal_galaxy_catalog","***");
+	//att->push("tycho_2_star_catalog","***");
 
 	att->push("galactic",galactic?"yes":"no");
 	att->push("transparent",transparent?"yes":"no");
 	
+	att->push("bigthreshhold",bigthreshhold,-1);
 	att->push("minimum_magnitude",minimum_magnitude,-1);
 	att->push("maximum_magnitude",maximum_magnitude,-1);
 
@@ -141,9 +198,12 @@ LaxFiles::Attribute *RenderContext::dump_out_atts(LaxFiles::Attribute *att,int w
 
 
     //char ss[50], *str=NULL;
+	Catalog *cat;
     for (int c=0; c<catalogs.n; c++) {
-        //sprintf(ss,"%.10g,%.10g\n",points.e[c].x,points.e[c].y);
-        //appendstr(str,ss);
+		cat=catalogs.e[c];
+		aa=new Attribute("catalog",cat->TypeName());
+		cat->dump_out_atts(aa,what,context);
+		att->push(aa,-1);
     }
 
 
@@ -152,6 +212,9 @@ LaxFiles::Attribute *RenderContext::dump_out_atts(LaxFiles::Attribute *att,int w
 
 void RenderContext::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *context)
 {
+	const char *pgc_file=NULL;
+	const char *tycho_file=NULL;
+
     char *name,*value;
     for (int c=0; c<att->attributes.n; c++) {
         name= att->attributes.e[c]->name;
@@ -160,14 +223,86 @@ void RenderContext::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *con
         if (!strcmp(name,"filename")) {
             makestr(filename,value);
 
-        } // *** ...
-//		else if (!strcmp(name,"type")) {
-//            if (!value) continue;
-//            if (!strcmp(value,"linear"))          curvetype=Linear;
-//            else if (!strcmp(value,"autosmooth")) curvetype=Autosmooth;
-//            else if (!strcmp(value,"bezier"))     curvetype=Bezier;
-//		}
+		} else if (!strcmp(name,"width")) {
+			LongAttribute(value,&width,NULL);
+
+		} else if (!strcmp(name,"height")) {
+			LongAttribute(value,&height,NULL);
+
+		} else if (!strcmp(name,"principal_galaxy_catalog")) {
+			pgc_file=value;
+
+		} else if (!strcmp(name,"tycho_2_star_catalog")) {
+			tycho_file=value;
+
+		} else if (!strcmp(name,"galactic")) {
+			galactic=BooleanAttribute(value);
+
+		} else if (!strcmp(name,"transparent")) {
+			transparent=BooleanAttribute(value);
+	
+		} else if (!strcmp(name,"bigthreshhold")) {
+			DoubleAttribute(value,&bigthreshhold,NULL);
+
+		} else if (!strcmp(name,"minimum_magnitude")) {
+			DoubleAttribute(value,&minimum_magnitude,NULL);
+
+		} else if (!strcmp(name,"maximum_magnitude")) {
+			DoubleAttribute(value,&maximum_magnitude,NULL);
+
+		} else if (!strcmp(name,"halosize")) {
+			DoubleAttribute(value,&usehalo,NULL);
+
+		} else if (!strcmp(name,"min_asc")) {
+			DoubleAttribute(value,&min_asc,NULL);
+
+		} else if (!strcmp(name,"max_asc")) {
+			DoubleAttribute(value,&max_asc,NULL);
+
+		} else if (!strcmp(name,"min_dec")) {
+			DoubleAttribute(value,&min_dec,NULL);
+
+		} else if (!strcmp(name,"max_dec")) {
+			DoubleAttribute(value,&max_dec,NULL);
+
+
+
+		} else if (!strcmp(name,"ramp")) {
+			ramp->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"blowout")) {
+			blowout->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"index_r")) {
+			index_r->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"index_g")) {
+			index_g->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"index_b")) {
+			index_b->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"bigscale")) {
+			bigscale->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"pointopacity")) {
+			pointopacity->dump_in_atts(att->attributes.e[c], flag,context);
+
+		} else if (!strcmp(name,"catalog")) {
+			Catalog *cat=NULL;
+			if (!strcmp(value,"RandomMemory")) cat=new RandomCatalog(NULL,1);
+			else cat=new Catalog(NULL,NULL,Unknown);
+
+			cat->dump_in_atts(att, flag,context);
+			catalogs.push(cat,1);
+		}
 	}
+
+
+
+
+	if (pgc_file)   catalogs.push(new Catalog("Principal Galaxy Catalog", pgc_file,   PrincipalGalaxy),1);
+	if (tycho_file) catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file, Tycho2),         1);
 }
 
  
@@ -287,6 +422,37 @@ int RandomCatalog::Render(RenderContext *context, unsigned char *data,int ww,int
 
 //------------------------------- Catalog -----------------------------------
 
+class CatalogStats
+{
+  public:
+	int numstars;
+	int numgalaxies;
+	int numnebulae;
+	int numother;
+
+	int mags[50];
+	int minmag;
+
+	double rendertime;
+	
+	CatalogStats();
+};
+
+CatalogStats::CatalogStats()
+{
+	numstars=0;
+	numgalaxies=0;
+	numnebulae=0;
+	numother=0;
+
+	memset(mags,0,50*sizeof(int));
+	minmag=0; //what is the actual magnitude of mags[0];
+
+	rendertime=0;
+}
+
+
+
 /*! \class Catalog
  * Hold information about a sky catalog,
  * such as the Tycho 2 Star Catalog, or the Principal Galaxy Catalog.
@@ -301,9 +467,15 @@ Catalog::Catalog(const char *nname, const char *nfile, CatalogTypes ntype)
 	min_mag_cutoff=max_mag_cutoff=0;
 	
 	 //stats stuff:
-	magnitude_distribution=NULL;
-	nummags=0;
+	//magnitude_distribution=NULL;
+	//nummags=0;
 	minimum_magnitude=maximum_magnitude=0;
+	numstars=0;
+
+	min_mag_cutoff=20;
+	max_mag_cutoff=0;
+
+	visible=1;
 }
 
 Catalog::~Catalog()
@@ -312,6 +484,94 @@ Catalog::~Catalog()
 	if (filename) delete[] filename;
 }
 
+const char *Catalog::TypeName()
+{
+	if (type==Tycho2)          return "Tycho2";
+	if (type==PrincipalGalaxy) return "PrincipalGalaxy";
+	if (type==RandomMemory)    return "RandomMemory";
+	if (type==CustomStars)     return "CustomStars";
+	if (type==CustomGalaxy)    return "CustomGalaxy";
+	return "Unknown";
+}
+
+void Catalog::dump_out(FILE *f,int indent,int what,anObject *context)
+{
+    Attribute *att=dump_out_atts(NULL,0,context);
+    att->dump_out(f,indent);
+    delete att;
+}
+
+LaxFiles::Attribute *Catalog::dump_out_atts(LaxFiles::Attribute *att,int what,anObject *context)
+{
+    if (!att) att=new Attribute("RenderContext",NULL);
+
+    if (what==-1) {
+        // *** format description
+        return att;
+    }
+
+    if (name) att->push("name",name);
+	att->push("type",TypeName());
+    if (filename) att->push("file",filename);
+
+	att->push("minimum_magnitude",minimum_magnitude,-1);
+	att->push("maximum_magnitude",maximum_magnitude,-1);
+	att->push("max_mag_cutoff",max_mag_cutoff,-1);
+	att->push("min_mag_cutoff",min_mag_cutoff,-1);
+
+	//att->push("min_asc", min_asc,-1);
+	//att->push("max_asc", max_asc,-1);
+	//att->push("min_dec", min_dec,-1);
+	//att->push("max_dec", max_dec,-1);
+
+	//Attribute *aa;
+	//aa=new Attribute("ramp",NULL);
+	//ramp->dump_out_atts(aa,what,context);
+	//att->push(aa,-1);
+
+    return att;
+}
+
+void Catalog::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *context)
+{
+    char *aname,*value;
+    for (int c=0; c<att->attributes.n; c++) {
+        aname=att->attributes.e[c]->name;
+        value=att->attributes.e[c]->value;
+
+        if (!strcmp(aname,"filename")) {
+            makestr(filename,value);
+
+		} else if (!strcmp(aname,"name")) {
+            makestr(name,value);
+
+		} else if (!strcmp(aname,"type")) {
+			if (!strcmp(value,"Tycho2")) type=Tycho2;
+			else if (!strcmp(value,"PrincipalGalaxy")) type=PrincipalGalaxy;
+			//other types are subclasses...?
+
+		} else if (!strcmp(aname,"minimum_magnitude")) {
+			DoubleAttribute(value,&minimum_magnitude,NULL);
+
+		} else if (!strcmp(aname,"maximum_magnitude")) {
+			DoubleAttribute(value,&maximum_magnitude,NULL);
+
+		} else if (!strcmp(aname,"min_mag_cutoff")) {
+			DoubleAttribute(value,&min_mag_cutoff,NULL);
+
+		} else if (!strcmp(aname,"max_mag_cutoff")) {
+			DoubleAttribute(value,&max_mag_cutoff,NULL);
+
+		//} else if (!strcmp(name,"pointopacity")) {
+		//	pointopacity->dump_in_atts(att->attributes.e[c], flag,context);
+		
+		}
+
+	}
+
+}
+
+ 
 
 //! Default is to just fopen(filename), return nonzero for error, or 0 for success.
 int Catalog::OpenCatalog()
@@ -345,6 +605,7 @@ int Catalog::CloseCatalog()
 
 int Catalog::Render(RenderContext *context)
 {
+	if (type==CustomGalaxy)    return Process_Galaxy(context);
 	if (type==PrincipalGalaxy) return Process_PGC(context);
 	if (type==Tycho2)          return Process_Tycho(context);
 
@@ -354,10 +615,86 @@ int Catalog::Render(RenderContext *context)
 
 
 
+//------------------------- Custom Galaxy processing ---------------------------
+int Process_Galaxy(RenderContext *rr)
+{
+	const char *file=rr->catalog->filename;
+
+
+    double Ra;   //right ascension (longitude)
+    double Dec;  //declination (latitude)
+    double vmag; //visual mag
+    double bmag; //blue mag
+
+	//double colorindex;
+	//double colorindex_min= 10000;
+	//double colorindex_max=-10000;
+
+	int mags[50];
+	int magmin=1000, magmax=-1000;
+	memset(mags,0,50*sizeof(int));
+
+
+	cout <<"Scanning Galaxy file: "<<file<<endl;
+
+	int numgalaxies=0;
+	if (file) {
+		char *line=NULL;
+		size_t n=0;
+		ssize_t c;
+		FILE *f=fopen(file,"r");
+		if (!f) {
+			cerr <<" --Fail!-- Could not open Custom Galaxy file: "<<file<<endl;
+			return 1;
+		}
+		do {
+
+			c=getline(&line,&n,f);
+			if (c<0) break;
+			if (c==0) continue;
+
+			 //the catalog lines are delimited by '|' characters, but also arranged on strict byte widths
+			Ra   = strtod(line,NULL);          // RA
+			Dec  = strtod(line+13,NULL);         //DEC
+			vmag = strtod(line+26,NULL); //overall visual magnitude, bytes 60-63
+			vmag-= 4;
+			bmag = vmag+.2; //makes index refer to a slightly blue object
+
+			if (Ra<0) Ra+=360;
+		 
+			if (Ra<rr->min_asc || Ra>rr->max_asc || Dec<rr->min_dec || Dec>rr->max_dec) continue;
+
+			//cerr <<" a,d,m: "<<Ra<<"  "<<Dec<<"  "<<vmag<<endl;
+
+			if (vmag>rr->minimum_magnitude || vmag<rr->maximum_magnitude) continue;
+			if (Ra==0 && Dec==0) continue;
+
+			if (vmag<magmin) magmin=vmag;
+			if (vmag>magmax) magmax=vmag;
+			mags[int(vmag-magmin)]++;
+
+
+			drawStar(rr, Ra, Dec, vmag, bmag);
+
+			numgalaxies++;
+			if (numgalaxies%10000==0) cout <<"+\n";
+
+		} while (!feof(f));
+		if (line) free(line);
+
+		fclose(f);
+	}
+
+	return 0;
+}
+
+
+
 //------------------------- Principal Galaxy Catalog processing ---------------------------
 int Process_PGC(RenderContext *rr)
 {
 	const char *pgc_file=rr->catalog->filename;
+	if (!pgc_file) return 1;
 
 
     double Ra;   //right ascension (longitude)
@@ -406,6 +743,8 @@ int Process_PGC(RenderContext *rr)
 			if (vmag>rr->minimum_magnitude || vmag<rr->maximum_magnitude) continue;
 			if (Ra==0 && Dec==0) continue;
 
+			if (Ra<rr->min_asc || Ra>rr->max_asc || Dec<rr->min_dec || Dec>rr->max_dec) continue;
+
 			if (vmag<magmin) magmin=vmag;
 			if (vmag>magmax) magmax=vmag;
 			mags[int(vmag-magmin)]++;
@@ -421,6 +760,7 @@ int Process_PGC(RenderContext *rr)
 
 		fclose(f);
 	}
+	cout <<"Rendered "<<numgalaxies<<" from "<<pgc_file<<endl;
 
 	return 0;
 }
@@ -503,6 +843,8 @@ int Process_Tycho(RenderContext *rr)
 		 
 			if (vmag>rr->minimum_magnitude || vmag<rr->maximum_magnitude) continue;
 			if (Ra==0 && Dec==0) continue;
+
+			if (Ra<rr->min_asc || Ra>rr->max_asc || Dec<rr->min_dec || Dec>rr->max_dec) continue;
 
 			if (vmag<magmin) magmin=vmag;
 			if (vmag>magmax) magmax=vmag;
@@ -768,8 +1110,6 @@ void drawStarSimple(RenderContext *context, double ra, double dec, double index,
   double x, y;
   StarColor color;
   indexToRgb(context, index, vmag, color);  // Get a color for the star
-  //stroke(c);
-  //fill(c);
   
   // map to screen coordinates
   x = map(ra,  0, 1,     0,   context->width);
@@ -797,6 +1137,8 @@ void drawStarSimple(RenderContext *context, double ra, double dec, double index,
   }
   else
   {
+	int aa=context->pointopacity->lookup[color.alpha()];
+	color.alpha(aa);
 	point(context, x, y, color, span);
   }
 }
@@ -806,22 +1148,22 @@ void drawStarSimple(RenderContext *context, double ra, double dec, double index,
 /**
  * This draws a pixel or small circle to the screen.
  */
-void drawStar(RenderContext *rr, double ra, double dec, double vmag, double bmag)
+void drawStar(RenderContext *context, double ra, double dec, double vmag, double bmag)
 {
   double x, y;
   StarColor color;
   double index = bmag-vmag;
-  indexToRgb(rr, index, vmag, color);  // Get a color for the star
+  indexToRgb(context, index, vmag, color);  // Get a color for the star
   
   // map to screen coordinates
-  x = map(ra, 0, 360, 0, rr->width);
-  y = map(dec, -90, 90, rr->height, 0);
+  x = map(ra, 0, 360, 0, context->width);
+  y = map(dec, -90, 90, context->height, 0);
 
   //cout <<"x:"<<x<<"  y:"<<y<<endl;
   
   
   // if Galactic Coordinates..
-  if (rr->galactic) {
+  if (context->galactic) {
   	  //cout <<"ra:"<<radians(ra)<<"  dec:"<<radians(dec)<<endl;
 
 	  flatvector galacticCoord = Eq2Gal(radians(ra), radians(dec));
@@ -832,28 +1174,36 @@ void drawStar(RenderContext *rr, double ra, double dec, double vmag, double bmag
 		x -= 360;
 	  
 	  // map to screen coordinates
-	  x = map(x, -180, 180, 0, rr->width);
-	  y = map(galacticCoord.y, -90, 90, rr->height, 0);
+	  x = map(x, -180, 180, 0, context->width);
+	  y = map(galacticCoord.y, -90, 90, context->height, 0);
   }
   
    //figure out how much the star is stretched out in final image
   double span=1;
-  if (rr->galactic) dec=180.*(y-rr->height/2)/rr->height;
+  if (context->galactic) dec=180.*(y-context->height/2)/context->height;
   double declination_radians=dec/180.*M_PI;
-  if (declination_radians==M_PI) span=rr->width;
+  if (declination_radians==M_PI) span=context->width;
   else span=1/cos(declination_radians);
-  if (span>rr->width) span=rr->width;
+  if (span>context->width) span=context->width;
 
 
   // For bright stars draw a cicle, otherwise just a pixel
-  if (vmag < rr->bigthreshhold)
+  if (vmag < context->bigthreshhold)
   {
-    double s = map(vmag, rr->bigthreshhold, -1, 2, rr->maxstarsize);
-	ellipse(rr, x, y, s, s,  color, span);
+    //double s = map(vmag, context->bigthreshhold, -1, 2, context->maxstarsize);
+
+    double s = map(vmag, context->bigthreshhold, -1, 0, 255);
+	int ss=context->bigscale->lookup[(int)constrain(s, 0,255)];
+	//cerr <<" map size mag:"<<vmag<<"  i:"<<(int)constrain(s, 0,255)<<"  size:"<<ss<<endl;
+
+	color.alpha(255);
+	ellipse(context, x, y, ss, ss,  color, span);
   }
   else
   {
-	point(rr, x, y, color, span);
+	int aa=context->pointopacity->lookup[color.alpha()];
+	color.alpha(aa);
+	point(context, x, y, color, span);
   }
 }
 
@@ -1065,12 +1415,17 @@ void CreateStockHalo(int w,double halosize, unsigned char *halodata,
 int Render(RenderContext *context)
 {
 
+	cout <<"Render to: "<<context->filename<<endl;
+	cout <<"Width:     "<<context->width<<endl;
+	cout <<"Height:    "<<context->height<<endl;
+
 	 //create halo image if necessary
 	if (!context->halo) {
 		context->halowidth=context->maxstarsize*context->usehalo;
 		context->halo=new unsigned char[context->halowidth*context->halowidth];
 		CreateStockHalo(context->halowidth, context->usehalo, context->halo, "g",
-						context->ramp,context->blowout,"halo.png");
+						context->ramp,context->blowout,NULL);
+						//context->ramp,context->blowout,"halo.png");
 	}
 
 
@@ -1093,7 +1448,14 @@ int Render(RenderContext *context)
 	}
 
 
-	 //Render the stack of catalogs
+
+	int mags[50];
+	int magmin=1000, magmax=-1000;
+	memset(mags,0,50*sizeof(int));
+	int numstars=0;
+	int numgalaxies=0;
+
+	 //--------- Render the stack of catalogs ---------------------
 	for (int c=0; c<context->catalogs.n; c++) {
 		context->catalog=context->catalogs.e[c];
 		context->catalog->Render(context);
@@ -1101,12 +1463,6 @@ int Render(RenderContext *context)
 
 
 
-
-	int mags[50];
-	int magmin=1000, magmax=-1000;
-	memset(mags,0,50*sizeof(int));
-	int numstars=0;
-	int numgalaxies=0;
 
 
 	//-------------- print summary ------------------
@@ -1133,11 +1489,6 @@ int Render(RenderContext *context)
     //stars->magick("TIFF");
 	//stars->matte(true);
 
-	//char scratch[100];
-	//sprintf(scratch,"%dx%d",width,height);
-	//stars->size(scratch);
-	//if (transparent) stars->read("xc:transparent");
-	//else stars->read("xc:#00000000");
 
 	stars->compressType(LZWCompression);
 	stars->read(context->width,context->height,"BGRA",CharPixel,context->data);

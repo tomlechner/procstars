@@ -80,6 +80,8 @@
 #include <lax/rowframe.h>
 #include <lax/laxutils.h>
 #include <lax/buttondowninfo.h>
+#include <lax/quickfileopen.h>
+#include <lax/checkbox.h>
 
 #include </usr/include/GraphicsMagick/Magick++.h>
 
@@ -220,14 +222,14 @@ int HaloWindow::init()
 	last=win=ramp=new CurveWindow(NULL,"Ramp","Ramp",0, 5,5,500,500,0, last,object_id,"ramp",
 						 			 "Halo Ramp", "radius",0,1,  "a",0,255);
 	//radius->AddPoint(.7,255); // *** or whatever halostart is
+	ramp->SetInfo(context->ramp);
 	ramp->GetInfo()->curvetype=CurveInfo::Autosmooth;
-	context->ramp=ramp->GetInfo();
 	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
 
 
 	last=win=blowout=new CurveWindow(NULL,"Blowout","Blowout",0, 5,5,500,500,0, last,object_id,"blowout",
 							"Halo Blowout", "opacity",0,1,  "color",0,1);
-	context->blowout=blowout->GetInfo();
+	blowout->SetInfo(context->blowout);
 	blowout->GetInfo()->curvetype=CurveInfo::Autosmooth;
 	AddWin(win,1, 200,100,200,50,0,  200,100,200,50,0, -1);
 
@@ -244,14 +246,9 @@ int HaloWindow::init()
  */
 void HaloWindow::Reset(int which)
 {
-	if (which&1) {
-		//radius->AddPoint(.7,255); // *** or whatever halostart is
-		ramp->Reset();
-	}
-
-	if (which&2) {
-		blowout->Reset();
-	}
+	context->Reset(which);
+	ramp->Needtodraw(1);
+	blowout->Needtodraw(1);
 
 	needtodraw=1;
 }
@@ -264,7 +261,6 @@ void HaloWindow::Refresh()
 	int pad=10;
 	int w=wholelist.e[0]->w()-2*pad;
 	int h=wholelist.e[0]->h()-2*pad;
-	//double pos, r,g,b;
 
 	if (h<w) w=h;
 	foreground_color(0);
@@ -287,7 +283,6 @@ void HaloWindow::UpdateHalo()
 {
 	ramp->GetInfo()->RefreshLookup(256, 0,255);
 	blowout->GetInfo()->RefreshLookup(256, 0,255);
-	blowout->GetInfo()->LookupDump("blowout",stdout); // ***dbg
 	
 	unsigned char *data=halo->getImageBuffer();
 	int w=halo->w();
@@ -357,31 +352,19 @@ int IndexWindow::init()
 
 	last=win=rr=new CurveWindow(NULL,"Red","Red",0, 5,5,500,500,0, last,object_id,"red",
 						 			 "Red", "B-V",-0.5,2,  "r",0,255);
-	context->index_r=rr->GetInfo();
-	rr->GetInfo()->curvetype=CurveInfo::Autosmooth;
-	rr->AddPoint(.4,255);
+	rr->SetInfo(context->index_r);
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
 	last=win=gg=new CurveWindow(NULL,"Green","Green",0, 5,5,500,500,0, last,object_id,"green",
 							"Green", "B-V",-0.5,2,  "g",0,255);
-	context->index_g=gg->GetInfo();
-	gg->GetInfo()->curvetype=CurveInfo::Autosmooth;
-	gg->MovePoint(0, -.5,170);
-	gg->MovePoint(1, 2,0);
-	gg->AddPoint(.4,255);
-	gg->AddPoint(1.7,200);
+	gg->SetInfo(context->index_g);
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
 	last=win=bb=new CurveWindow(NULL,"Blue","Blue",0, 5,5,500,500,0, last,object_id,"blue",
 							"Blue", "B-V",-0.5,2, "b",0,255);
-	context->index_b=bb->GetInfo();
-	bb->GetInfo()->curvetype=CurveInfo::Autosmooth;
-	bb->MovePoint(0, -.5,255);
-	bb->MovePoint(1, 2,0);
-	bb->AddPoint(.5,255);
-	bb->AddPoint(1.7,150);
+	bb->SetInfo(context->index_b);
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 	Reset(~0);
@@ -396,27 +379,10 @@ int IndexWindow::init()
  */
 void IndexWindow::Reset(int which)
 {
-	if (which&1) {
-		rr->Reset();
-		rr->AddPoint(.25,230);
-		rr->AddPoint(.4,255);
-	}
-
-	if (which&2) {
-		gg->Reset();
-		gg->MovePoint(0, -.5,170);
-		gg->MovePoint(1, 2,0);
-		gg->AddPoint(.4,255);
-		gg->AddPoint(1.7,200);
-	}
-
-	if (which&4) {
-		bb->Reset();
-		bb->MovePoint(0, -.5,255);
-		bb->MovePoint(1, 2,0);
-		bb->AddPoint(.5,255);
-		bb->AddPoint(1.7,150);
-	}
+	context->Reset(which);
+	rr->Needtodraw(1);
+	gg->Needtodraw(1);
+	bb->Needtodraw(1);
 
 	UpdateIndex();
 
@@ -488,6 +454,243 @@ int IndexWindow::Event(const EventData *e,const char *mes)
 }
 
 
+//--------------------------------- MagnitudeSelectWindow ---------------------------------
+/*! \class MagnitudeSelectWindow
+ */
+class MagnitudeSelectWindow : public Laxkit::anXWindow
+{
+  public:
+	enum MagThings {
+		Usemax=1,
+		Usemin,
+		Userange,
+		Max,
+		Min,
+		Cutoff
+	};
+
+	int firsttime;
+	int pad;
+	RenderContext *context;
+	ButtonDownInfo buttondown;
+
+	double max, min;
+	double cutoff;
+	double usemax, usemin;
+
+	MagnitudeSelectWindow(RenderContext *rr, anXWindow *parent);
+	virtual ~MagnitudeSelectWindow() {}
+	//virtual int init();
+	virtual void Refresh();
+
+	virtual int scan(int x,int y);
+	virtual int pos(double mag);
+	virtual double posToMag(int p);
+	virtual void send();
+
+	virtual int LBDown(int x,int y,unsigned int state,int count,const LaxMouse *d);
+    virtual int LBUp(int x,int y,unsigned int state,const LaxMouse *d);
+	virtual int MouseMove(int x,int y,unsigned int state,const LaxMouse *d);
+};
+
+MagnitudeSelectWindow::MagnitudeSelectWindow(RenderContext *rr, anXWindow *parent)
+  : anXWindow(parent,"Mag Window","Mag Window",ANXWIN_DOUBLEBUFFER, 500,0,600,900,0, NULL,parent->object_id,"magselect")
+{
+	context=rr;
+	pad=5;
+
+	max=-1;
+	min=15;
+	cutoff=context->bigthreshhold;
+	usemax=context->maximum_magnitude;
+	usemin=context->minimum_magnitude;
+
+	if (max<min) {
+		if (usemin>min) usemin=min;
+		if (usemax<max) usemax=max;
+	} else {
+		if (usemin<min) usemin=min;
+		if (usemax>max) usemax=max;
+	}
+
+	win_colors=app->color_panel;
+    win_colors->inc_count();
+}
+
+int MagnitudeSelectWindow::scan(int x,int y)
+{
+	if (x<win_w/2-pad) {
+		int mx=pos(usemax), mn=pos(usemin);
+		if (y>mx-2*pad && y<mx+2*pad) return Usemax;
+		if (y>mn-2*pad && y<mn+2*pad) return Usemin;
+		if (mn>mx) { int t=mn; mn=mx; mx=t; }
+		if (y>mn && y<mx) return Userange;
+	} else if (x>win_w/2+pad) {
+		return Cutoff;
+	} else {
+		int textheight=app->defaultlaxfont->textheight();
+		if (y<pad+textheight+pad) return Max;
+		if (y>win_h-pad-textheight-pad) return Min;
+	}
+
+	return 0;
+}
+
+void MagnitudeSelectWindow::Refresh()
+{
+	if (!needtodraw) return;
+	needtodraw=0;
+
+	clear_window(this);
+
+	int textheight=app->defaultlaxfont->textheight();
+	char scratch[100];
+	int p;
+
+	//draw line between max and min
+	double v;
+	for (int c=pad+textheight+pad; c<win_h-2*pad-textheight; c++) {
+		v=(double)(c-(pad+textheight+pad))/(win_h-4*pad-2*textheight);
+		if (max<min) v=1-v;
+		foreground_color(v,v,v);
+		draw_line(this, win_w/2-pad/2,c, win_w/2+pad/2,c);
+	}
+
+	//draw line between usemax and usemin
+	p=win_w/2-3*pad;
+	int p2=pos(usemax), p1=pos(usemin);
+	if (p1>p2) { int t=p1; p1=p2; p2=t; }
+	for (int c=p1; c<p2; c++) {
+		v=(double)(c-(pad+textheight+pad))/(win_h-4*pad-2*textheight);
+		if (usemax<usemin) v=1-v;
+		foreground_color(v,v,v);
+		draw_line(this, p-pad/3,c, p+pad/3,c);
+	}
+
+	foreground_color(win_colors->fg);
+
+	 //max
+	sprintf(scratch,"%.7g",max);
+	textout(this, scratch,-1, win_w/2,pad, LAX_HCENTER|LAX_TOP);
+
+	 //min
+	sprintf(scratch,"%.7g",min);
+	textout(this, scratch,-1, win_w/2,win_h-pad, LAX_HCENTER|LAX_BOTTOM);
+
+	 //usemax
+	p=pos(usemax);
+	sprintf(scratch,"%.3g",usemax);
+	textout(this, scratch,-1, win_w/2-2*pad-textheight,p, LAX_RIGHT|LAX_VCENTER);
+	draw_line(this, win_w/2-pad-textheight,p, win_w/2+pad,p);
+
+	 //usemin
+	p=pos(usemin);
+	sprintf(scratch,"%.3g",usemin);
+	textout(this, scratch,-1, win_w/2-2*pad-textheight,p, LAX_RIGHT|LAX_VCENTER);
+	draw_line(this, win_w/2-pad-textheight,p, win_w/2+pad,p);
+
+	
+	 //cutoff
+	p=pos(cutoff);
+	sprintf(scratch,"%.3g",cutoff);
+	draw_line(this, win_w/2-2*pad,p, win_w/2+pad+textheight,p);
+	textout(this, scratch,-1, win_w/2+pad+textheight+pad,p, LAX_LEFT|LAX_VCENTER);
+
+	textout(this, "halos",-1, win_w/2+pad,p-pad, LAX_LEFT|LAX_BOTTOM);
+	textout(this, "points",-1, win_w/2+pad,p+pad, LAX_LEFT|LAX_TOP);
+
+	SwapBuffers();
+}
+
+int MagnitudeSelectWindow::pos(double mag)
+{
+	int textheight=app->defaultlaxfont->textheight();
+	return win_h-(2*pad+textheight) - (mag-min)/(max-min)*(win_h-4*pad-2*textheight);
+}
+
+double MagnitudeSelectWindow::posToMag(int p)
+{
+	int textheight=app->defaultlaxfont->textheight();
+	return (win_h-(2*pad+textheight)-p)*(max-min) / (win_h-4*pad-2*textheight);
+}
+
+int MagnitudeSelectWindow::LBDown(int x,int y,unsigned int state,int count,const LaxMouse *d)
+{
+	int p=scan(x,y);
+	if (p!=0) buttondown.down(d->id, LEFTBUTTON, x,y, p);
+	return 0;
+}
+
+int MagnitudeSelectWindow::LBUp(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	int dragged=buttondown.up(d->id, LEFTBUTTON);
+
+	if (!dragged) {
+		 //edit number in a box
+	}
+
+	return 0;
+}
+
+int MagnitudeSelectWindow::MouseMove(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	int p=scan(x,y);
+	cerr <<" mag select over: "<<p<<endl;
+
+	int ox,oy;
+	buttondown.move(d->id, x,y, &ox,&oy);
+
+	if (!buttondown.any()) return 0;
+
+	buttondown.getextrainfo(d->id,LEFTBUTTON, &p);
+
+	double oldp=posToMag(oy);
+	double newp=posToMag(y);
+
+	if (p==Cutoff) {
+		cutoff+=newp-oldp;
+		if (cutoff>min) cutoff=min;
+		if (cutoff<max) cutoff=max;
+		context->bigthreshhold=cutoff;
+		needtodraw=1;
+
+		send();
+		return 0;
+
+	} else if (p==Usemin) {
+		usemin+=newp-oldp;
+		if (usemin<usemax) usemin=usemax;
+		if (usemin>min) usemin=min;
+		context->minimum_magnitude=usemin;
+		needtodraw=1;
+
+		send();
+		return 0;
+
+	} else if (p==Usemax) {
+		usemax+=newp-oldp;
+		if (usemax<max) usemax=max;
+		if (usemax>usemin) usemax=usemin;
+		context->maximum_magnitude=usemax;
+		needtodraw=1;
+
+		send();
+		return 0;
+	}
+
+
+	return 0;
+}
+
+void MagnitudeSelectWindow::send()
+{
+    if (win_owner) {
+        SimpleMessage *ev=new SimpleMessage;
+        app->SendMessage(ev,win_owner,win_sendthis,object_id);
+    }
+}
+
+
 //--------------------------------- SizeWindow ---------------------------------
 /*! \class SizeWindow
  * Control window for adjusting sizes of stars.
@@ -497,6 +700,7 @@ class SizeWindow : public Laxkit::RowFrame
   public:
 	RenderContext *context;
 
+	MagnitudeSelectWindow *magselect;
 	CurveWindow *bigscale,*pointopacity;
 	SizeWindow(RenderContext *rr);
 	virtual ~SizeWindow();
@@ -514,6 +718,7 @@ SizeWindow::SizeWindow(RenderContext *rr)
 	context=rr;
 	bigscale=NULL;
 	pointopacity=NULL;
+	magselect=NULL;
 }
 
 SizeWindow::~SizeWindow()
@@ -526,22 +731,20 @@ int SizeWindow::init()
 
 	CurveWindow *win=NULL;
 	
-	AddSpacer(75,25,50,50,  200,150,200,50, -1); //*** for range selector
+	MagnitudeSelectWindow *magselect=new MagnitudeSelectWindow(context, this);
+	AddWin(magselect,1, 125,25,50,50,0,  200,150,200,50,0, -1);
+
 
 
 	last=win=bigscale=new CurveWindow(NULL,"Large","Large",0, 5,5,500,500,0, last,object_id,"large",
-						 			 "Big star scale", "magnitude",context->bigthreshhold,-1, "px",1,100);
-	bigscale->editable=CurveWindow::YMax|CurveWindow::YUnits;
-	bigscale->GetInfo()->MovePoint(1, context->maximum_magnitude,context->maxstarsize);
-	context->bigscale=bigscale->GetInfo();
-	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+						 			 "Big star scale", "magnitude",context->bigthreshhold,-1, "px",1,50);
+	bigscale->SetInfo(context->bigscale);
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
 	last=win=pointopacity=new CurveWindow(NULL,"Points","Points",0, 5,5,500,500,0, last,object_id,"points",
 							"Point Opacity", "mag",context->minimum_magnitude,context->bigthreshhold,  "a",0,1);
-	context->pointopacity=pointopacity->GetInfo();
-	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+	pointopacity->SetInfo(context->pointopacity);
 	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
 
 
@@ -564,8 +767,9 @@ int SizeWindow::init()
  */
 void SizeWindow::Reset(int which)
 {
-	if (which&1) {
-	}
+	context->Reset(which);
+	bigscale->Needtodraw(1);
+	pointopacity->Needtodraw(1);
 	needtodraw=1;
 }
 
@@ -601,8 +805,154 @@ int SizeWindow::Event(const EventData *e,const char *mes)
 		send();
 	}
 
+	if (!strcmp(mes,"magselect")) {
+		bigscale->GetInfo()->SetXBounds(context->bigthreshhold,context->maximum_magnitude);
+		bigscale->Needtodraw(1);
+		pointopacity->GetInfo()->SetXBounds(context->minimum_magnitude,context->bigthreshhold);
+		pointopacity->Needtodraw(1);
+		send();
+	}
+
 	if (!strcmp(mes,"large")) {
 		send("large");
+	}
+
+
+	needtodraw=1;
+	return 0;
+}
+
+
+//--------------------------------- CatalogWindow ---------------------------------
+/*! \class CatalogWindow
+ */
+class CatalogWindow : public Laxkit::RowFrame
+{
+  public:
+	RenderContext *context;
+
+	//MagnitudeSelectWindow *magselect;
+	//CurveWindow *bigscale,*pointopacity;
+
+	CatalogWindow(RenderContext *rr);
+	virtual ~CatalogWindow();
+	virtual int init();
+	virtual void Refresh();
+	virtual int Event(const EventData *e,const char *mes);
+	virtual void Reset(int which=~0);
+	virtual void UpdateCatalog();
+	virtual void send(const char *mes=NULL);
+};
+
+CatalogWindow::CatalogWindow(RenderContext *rr)
+  : RowFrame(NULL,"Catalog Window","Catalog Window",ROWFRAME_COLUMNS, 0,0,600,250,0, NULL,0,"update")
+{
+	context=rr;
+}
+
+CatalogWindow::~CatalogWindow()
+{
+}
+
+int CatalogWindow::init()
+{
+	anXWindow *last=NULL;
+
+	CheckBox *box;
+	last=box=new CheckBox(this, "galactic","galactic",CHECK_LEFT, 0,0,0,0,0, last,win_owner,"galactic","Galactic");
+	box->State(context->galactic?LAX_ON:LAX_OFF);
+	AddWin(box,1, box->win_w,0,50,50,0,  box->win_h,10,10,50,0, -1);
+
+	last=box=new CheckBox(this, "transparent","transparent",CHECK_LEFT, 0,0,0,0,0, last,win_owner,"transparent","Transparent");
+	box->State(context->transparent?LAX_ON:LAX_OFF);
+	AddWin(box,1, box->win_w,0,50,50,0,  box->win_h,10,10,50,0, -1);
+
+	LineInput *line;
+	last=line=new LineInput(this, "width","width",LINP_INT, 0,0,0,0,0, last,win_owner,"width","Width:");
+	line->SetText((int)context->width);
+	line->GetLineEdit()->win_style|=LINEEDIT_SEND_FOCUS_OFF;
+	AddWin(line,1, line->win_w,0,300,50,0, line->win_h,0,10,50,0, -1);
+
+	AddNull();
+
+	AddSpacer(1000,900,50,50,  200,150,200,50, -1);
+
+
+//	last=win=magmap=new CurveWindow(NULL,"Mag Map","Mag Map",0, 5,5,500,500,0, last,object_id,"magmap",
+//							"Magnitude Map", "mag",context->minimum_magnitude,context->bigthreshhold, "a",0,1);
+//	context->magmap=magmap->GetInfo();
+//	win->GetInfo()->curvetype=CurveInfo::Autosmooth;
+//	win->MovePoint(1, 0,0);
+//	AddWin(win,1, 200,100,200,50,0,  200,150,200,50,0, -1);
+
+	//UpdateCatalog();
+
+	last->CloseControlLoop();
+	Sync(1);
+	return 0;
+}
+
+/*! Reset to default colors.
+ * which is &1 for red, &2 for green, &4 for blue
+ */
+void CatalogWindow::Reset(int which)
+{
+	if (which&1) {
+	}
+	needtodraw=1;
+}
+
+void CatalogWindow::Refresh()
+{
+	if (!needtodraw) return;
+	if (arrangedstate!=1) Sync(0);
+
+	int pad=5;
+	int xx=wholelist.e[4]->x()+pad;
+	int yy=wholelist.e[4]->y()+pad;
+	//int ww=wholelist.e[4]->w();
+	//int hh=wholelist.e[4]->h();
+
+	textout(this, "Catalogs:",-1, xx,yy,LAX_LEFT|LAX_TOP);
+
+	char scratch[200];
+	int textheight=app->defaultlaxfont->textheight();
+	Catalog *cat;
+	int y=yy+textheight;
+	for (int c=0; c<context->catalogs.n; c++) {
+		cat=context->catalogs.e[c];
+		//sprintf(scratch,"^ v x %s: %s",cat->name,lax_basename(cat->filename));
+		sprintf(scratch,"%s: %s",cat->name,lax_basename(cat->filename));
+		textout(this, scratch,-1, xx,y,LAX_LEFT|LAX_TOP);
+		y+=textheight;
+	}
+	//textout(this, "New: PGC  Tycho  Random  Galaxy",-1, xx,y,LAX_LEFT|LAX_TOP);
+
+	needtodraw=0;
+}
+
+void CatalogWindow::send(const char *mes)
+{
+    if (win_owner) {
+        SimpleMessage *ev=new SimpleMessage;
+        app->SendMessage(ev,win_owner,mes?mes:win_sendthis,object_id);
+    }
+}
+
+void CatalogWindow::UpdateCatalog()
+{
+	//bigscale    ->GetInfo()->RefreshLookup(256, 1,bigscale->GetInfo()->ymax);
+	//pointopacity->GetInfo()->RefreshLookup(256, 0,255);
+}
+
+int CatalogWindow::Event(const EventData *e,const char *mes)
+{
+	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
+	if (!m) return anXWindow::Event(e,mes);
+
+	if (!strcmp(mes,"large") || !strcmp(mes,"points")) {
+		UpdateCatalog();
+		send();
 	}
 
 
@@ -620,28 +970,37 @@ class MainWindow : public Laxkit::RowFrame
 {
   public:
 	int firsttime;
+	int zoomed;
 
 	int numstars;
 	RandomCatalog previewcatalog;
 	LaxImage *preview;
 	int needtoupdate;
+	ButtonDownInfo buttondown;
 
+	LineInput *saveto;
 	HaloWindow *halowindow;
+	CatalogWindow *catalogwindow;
+
+	LaxImage *transparentmask;
 
 	RenderContext *context;
 	MainWindow(RenderContext *rr);
-	virtual ~MainWindow() {}
+	virtual ~MainWindow();
 	virtual int init();
 	virtual void Refresh();
 	virtual int Event(const EventData *e,const char *mes);
 	//virtual void Reset(int which=~0);
 	virtual void UpdatePreview();
 
+	virtual int scan(int x,int y);
+	virtual int LBDown(int x,int y,unsigned int state,int count,const LaxMouse *d);
     virtual int LBUp(int x,int y,unsigned int state,const LaxMouse *d);
+	virtual int MouseMove(int x,int y,unsigned int state,const LaxMouse *d);
 };
 
 MainWindow::MainWindow(RenderContext *rr)
-  : RowFrame(NULL,"Main Window","Main Window",ANXWIN_ESCAPABLE|ROWFRAME_ROWS, 500,0,600,900,0, NULL,0,NULL),
+  : RowFrame(NULL,"Main Window","Main Window",ANXWIN_ESCAPABLE|ROWFRAME_ROWS|ANXWIN_DOUBLEBUFFER, 500,0,600,900,0, NULL,0,NULL),
 	previewcatalog("preview",1000)
 {
 	numstars=1000;
@@ -649,49 +1008,64 @@ MainWindow::MainWindow(RenderContext *rr)
 	preview=NULL;
 	firsttime=2;
 	needtoupdate=1;
+	zoomed=0;
+
+	transparentmask=NULL;
 }
 
-int MainWindow::LBUp(int x,int y,unsigned int state,const LaxMouse *d)
+MainWindow::~MainWindow()
 {
-	if (x<win_w/3) numstars*=.6;
-	else if (x>win_w*2/3) numstars*=1.3;
-	if (numstars<100) numstars=100;
-
-	cerr <<"Regenerate "<<numstars<<"stars..."<<endl;
-
-
-	previewcatalog.Repopulate(numstars,0);
-	UpdatePreview();
-	needtodraw=1;
-	return 0;
+	transparentmask->dec_count();
 }
 
 int MainWindow::init()
 {
 	anXWindow *last=NULL;
 
-	AddSpacer(1000,2005,1000,50,  400,200,200,50, -1); //area for preview image
+	AddSpacer(win_w,0,1000,50,  win_w/2,0,500,50, -1); //area for preview image
+	//AddSpacer(win_w/2,0,1000,50,  win_w/2,0,500,50, -1); //area for preview image
+	//AddSpacer(200,10,2000,50,  10,10,200,50, -1); //area for preview image
 	AddNull();
 
 
 	//  Save To: ____ [...]    <<RENDER NOW>>    Save Settings To: ______[...] [load]
-	LineInput *file;
-	last=file=new LineInput(this, "File","File",0, 0,0,0,0,0, NULL,object_id,"file","Render To:","stars#.tif");
-	AddWin(file,1, file->win_w,0,300,50,0, file->win_h,0,10,50,0, -1);
+	last=saveto=new LineInput(this, "File","File",0, 0,0,0,0,0, NULL,object_id,"file","Render To:",context->filename);
+	AddWin(saveto,1, saveto->win_w,0,300,50,0, saveto->win_h,0,10,50,0, -1);
+
+	last=new QuickFileOpen(this, "Saveto","Saveto",0, 0,0,0,0,0, last,object_id,"saveto", FILES_SAVE, saveto);
+	AddWin(last,1, last->win_w,0,0,50,0, last->win_h*.9,0,0,50,0, -1);
+
+
+	AddSpacer(10,10,2000,50,  10,10,200,50, -1); //area for preview image
 
 	Button *button;
 	last=button=new Button(this, "Render","Render",0, 0,0,0,0,0, last,object_id,"render",0, " Render now! ");
 	button->gap=button->win_w*.25;
 	AddWin(button,1, button->win_w,0,300,50,0, button->win_h,0,10,50,0, -1);
 
-	last=file=new LineInput(this, "Save Settings","Save Settings",0, 0,0,0,0,0, last,object_id,"settings","Project:","");
-	AddWin(file,1, file->win_w,0,300,50,0, file->win_h,0,10,50,0, -1);
+	AddSpacer(10,10,2000,50,  10,10,200,50, -1); //area for preview image
+
+
+	MessageBar *m=new MessageBar(this, "Save Settings","Save Settings",0, 0,0,0,0,0, "Project: ");
+	AddWin(m,1, m->win_w,0,0,50,0, m->win_h,0,0,50,0, -1);
+
+
+	last=new Button(this, "Save Settings","Save Settings",0, 0,0,0,0,0, last,object_id,"saveprojto",0,"Save");
+	AddWin(last,1, last->win_w,0,300,50,0, last->win_h,0,10,50,0, -1);
+
+	last=new Button(this, "Load Settings","Load Settings",0, 0,0,0,0,0, last,object_id,"loadproj",0,"Load");
+	AddWin(last,1, last->win_w,0,300,50,0, last->win_h,0,10,50,0, -1);
+
+//	last=saveprojto=new LineInput(this, "Save Settings","Save Settings",0, 0,0,0,0,0, last,object_id,"settings","Project:",context->projectfile);
+//	AddWin(saveprojto,1, saveprojto->win_w,0,300,50,0, saveprojto->win_h,0,10,50,0, -1);
+//
+//	last=new QuickFileOpen(this, "Saveprojto","Saveprojto",0, 0,0,0,0,0, last,object_id,"saveprojto", FILES_SAVE, saveprojto);
+//	AddWin(last,1, last->win_w,0,0,50,0, last->win_h*.9,0,0,50,0, -1);
 
 	AddNull();
 
 
 	 //-----editing windows:
-
 	SizeWindow *swin=new SizeWindow(context);
 	swin->SetOwner(this);
 	AddWin(swin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
@@ -704,6 +1078,10 @@ int MainWindow::init()
 	halowindow->SetOwner(this);
 	AddWin(halowindow,1, 800,400,200,50,0,  200,150,200,50,0, -1);
 
+	catalogwindow=new CatalogWindow(context);
+	catalogwindow->SetOwner(this);
+	AddWin(catalogwindow,1, 800,400,200,50,0,  200,150,200,50,0, -1);
+
 	//CatalogWindow *catwin=new CatalogWindow();
 	//AddWin(catwin,1, 800,400,200,50,0,  200,150,200,50,0, -1);
 
@@ -711,6 +1089,20 @@ int MainWindow::init()
 
 	last->CloseControlLoop();
 	Sync(1);
+
+
+	int bw=50;
+	transparentmask=create_new_image(bw,bw);
+	unsigned char *data=transparentmask->getImageBuffer();
+	for (int i=0; i<bw*bw*4; i+=4) {
+		data[i+0]=0;
+		data[i+1]=0;
+		data[i+2]=0;
+		data[i+3]=200;
+	}
+	transparentmask->doneWithBuffer(data);
+
+
 	return 0;
 }
 
@@ -719,8 +1111,87 @@ int MainWindow::Event(const EventData *e,const char *mes)
 	const SimpleMessage *m=dynamic_cast<const SimpleMessage*>(e);
 	if (!m) return anXWindow::Event(e,mes);
 
+	if (!strcmp(mes,"galactic")) {
+		if (m->info1==LAX_ON) context->galactic=1;
+		else context->galactic=0;
+		needtodraw=1;
+		UpdatePreview();
+		return 0;
+	}
+	
+	if (!strcmp(mes,"transparent")) {
+		if (m->info1==LAX_ON) context->transparent=1;
+		else context->transparent=0;
+		needtodraw=1;
+		return 0;
+	}
+
+	if (!strcmp(mes,"width")) {
+		context->width=strtol(m->str,NULL,10);
+		context->height=context->width/2;
+		needtodraw=1;
+		return 0;
+	}
+
+
+
+	if (!strcmp(mes,"saveto")) {
+		makestr(context->filename,m->str);
+		saveto->SetText(m->str);
+		saveto->GetLineEdit()->SetCurpos(-1);
+		return 0;
+	}
+
+	if (!strcmp(mes,"loadproj")) {
+	    app->rundialog(new FileDialog(NULL,"Load Project","Load Project", 0,
+                                0,0,0,0,1, 
+                                object_id,"nowloadproj",
+                                FILES_OPEN_ONE,
+                                context->projectfile
+                               ));
+		return 0;
+	}
+
+	if (!strcmp(mes,"nowloadproj")) {
+		FILE *f=fopen(context->projectfile,"r");
+		if (!f) {
+			cerr << "Could not save to "<<context->projectfile<<"!"<<endl;
+		} else {
+			makestr(context->projectfile,m->str);
+			context->dump_in(f,0,0,NULL,NULL);
+			fclose(f);
+
+			UpdatePreview();
+		}
+		return 0;
+	}
+
+	if (!strcmp(mes,"saveprojto")) {
+	    app->rundialog(new FileDialog(NULL,"Save Project","Save Project", 0,
+                                0,0,0,0,1, 
+                                object_id,"nowsaveprojto",
+                                FILES_SAVE,
+                                context->projectfile
+                               ));
+		return 0;
+	}
+
+	if (!strcmp(mes,"nowsaveprojto")) {
+		makestr(context->projectfile,m->str);
+		FILE *f=fopen(context->projectfile,"w");
+		if (!f) {
+			cerr << "Could not save to "<<context->projectfile<<"!"<<endl;
+		} else {
+			context->dump_out(f,0,0,NULL);
+			fclose(f);
+		}
+		return 0;
+	}
+
 	if (!strcmp(mes,"render")) {
 		cout <<"Render..."<<endl;
+
+		Render(context);
 		return 0;
 	}
 
@@ -756,7 +1227,8 @@ void MainWindow::UpdatePreview()
 		}
 	}
 	CreateStockHalo(context->halowidth, context->usehalo, context->halo, "g",
-					context->ramp,context->blowout,"halo.png");
+					context->ramp,context->blowout,NULL);
+					//context->ramp,context->blowout,"halo.png");
 
 	int ww=wholelist.e[0]->w();
 	int hh=wholelist.e[0]->h();
@@ -807,6 +1279,166 @@ void MainWindow::Refresh()
 	}
 
 	image_out_skewed(preview, this, xx,yy, ww,0, 0,hh);
+
+	foreground_color(.5,.5,.5);
+	if (!zoomed) {
+		
+		int min_asc_p=xx+context->min_asc/360*ww;
+		int max_asc_p=xx+context->max_asc/360*ww;
+		int min_dec_p=yy+context->min_dec/180*hh+hh/2;
+		int max_dec_p=yy+context->max_dec/180*hh+hh/2;
+
+
+		 //draw blackout
+		if (context->min_asc>0) {
+			image_out_skewed(transparentmask, this, 0,0, min_asc_p,0, 0,hh);
+		}
+		if (context->max_asc<360) {
+			image_out_skewed(transparentmask, this, max_asc_p,0, ww-max_asc_p+1,0, 0,hh);
+		}
+		if (context->min_dec>-90) {
+			image_out_skewed(transparentmask, this, 0,0, ww,0, 0,min_dec_p);
+		}
+		if (context->max_dec<90) {
+			image_out_skewed(transparentmask, this, 0,max_dec_p, ww,0, 0,hh-max_dec_p);
+		}
+
+		 //draw lines
+		if (context->min_asc>0) {
+			draw_line(this, min_asc_p,yy, min_asc_p,yy+hh);
+		}
+		if (context->max_asc<360) {
+			draw_line(this, max_asc_p,yy, max_asc_p,yy+hh);
+		}
+		if (context->min_dec>-90) {
+			draw_line(this, xx,min_dec_p, xx+ww,min_dec_p);
+		}
+		if (context->max_dec<90) {
+			draw_line(this, xx,max_dec_p, xx+ww,max_dec_p);
+		}
+	}
+
+	SwapBuffers();
+}
+
+#define MINASC 1
+#define MAXASC 2
+#define MINDEC 3
+#define MAXDEC 4
+#define SWITCH 5
+#define REFRESH 6
+#define FEWERSTARS 7
+#define MORESTARS  8
+
+int MainWindow::scan(int x,int y)
+{
+	int range=20;
+
+	int xx=wholelist.e[0]->x();
+	int yy=wholelist.e[0]->y();
+	int ww=wholelist.e[0]->w();
+	int hh=wholelist.e[0]->h();
+	int p;
+
+	if (!zoomed) {
+		p=xx+context->min_asc/360*ww;
+		cerr <<"x:"<<x<<"  p:"<<p<<"  minasc:"<<context->min_asc<<endl;
+		if (x<p+range && x>p-range) return MINASC;
+
+		p=xx+context->max_asc/360*ww;
+		cerr <<"x:"<<x<<"  p:"<<p<<"  maxasc:"<<context->max_asc<<endl;
+		if (x<p+range && x>p-range) return MAXASC;
+
+		p=yy+context->min_dec/180*hh+hh/2;
+		if (y<p+range && y>p-range) return MINDEC;
+
+		p=yy+context->max_dec/180*hh+hh/2;
+		if (y<p+range && y>p-range) return MAXDEC;
+	}
+
+	return -1;
+}
+
+int MainWindow::LBDown(int x,int y,unsigned int state,int count,const LaxMouse *d)
+{
+	int found=scan(x,y);
+
+	if (found>0) {
+		buttondown.down(d->id,LEFTBUTTON, x,y, found);
+	}
+
+
+	return 0;
+}
+
+int MainWindow::LBUp(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	int found=-1;
+	buttondown.up(d->id,LEFTBUTTON, &found);
+
+	if (found==REFRESH || found==MORESTARS || found==FEWERSTARS) {
+		if (x<win_w/3) numstars*=.6;
+		else if (x>win_w*2/3) numstars*=1.3;
+		if (numstars<100) numstars=100;
+
+		cerr <<"Regenerate "<<numstars<<"stars..."<<endl;
+
+
+		previewcatalog.Repopulate(numstars,0);
+		UpdatePreview();
+		needtodraw=1;
+		return 0;
+	}
+
+	return 0;
+}
+
+int MainWindow::MouseMove(int x,int y,unsigned int state,const LaxMouse *d)
+{
+	DBG int ff=scan(x,y);
+	DBG cerr <<"over: "<<ff<<endl;
+
+
+	if (!buttondown.any()) return 0;
+	
+	int ox,oy;
+	int found=-1;
+	buttondown.getextrainfo(d->id,LEFTBUTTON, &found);
+	if (found<=0) return 0;
+	buttondown.move(d->id, x,y, &ox,&oy);
+
+	int dx=x-ox;
+	int dy=y-oy;
+
+	int ww=wholelist.e[0]->w();
+	int hh=wholelist.e[0]->h();
+
+	double ddx=double(dx)/ww*360;
+	double ddy=double(dy)/hh*180;
+
+	if (found==MINASC) {
+		context->min_asc+=ddx;
+		if (context->min_asc>context->max_asc) context->min_asc=context->max_asc;
+		else if (context->min_asc<0) context->min_asc=0;
+
+	} else if (found==MAXASC) {
+		context->max_asc+=ddx;
+		if (context->max_asc<context->min_asc) context->max_asc=context->min_asc;
+		else if (context->max_asc>360) context->max_asc=360;
+
+	} else if (found==MINDEC) {
+		context->min_dec+=ddy;
+		if (context->min_dec>context->max_dec) context->min_dec=context->max_dec;
+		else if (context->min_dec<-90) context->min_dec=-90;
+
+	} else if (found==MAXDEC) {
+		context->max_dec+=ddy;
+		if (context->max_dec<context->min_dec) context->max_dec=context->min_dec;
+		else if (context->max_dec>90) context->max_dec=90;
+	}
+
+	needtodraw=1;
+	return 0;
 }
 
 //--------------------------------- main() --------------------------------
@@ -940,6 +1572,14 @@ int main(int argc, char **argv)
 		}
 	}
 
+	for (o=options.remaining(); o; o=options.next()) {
+		FILE *f=fopen(o->arg(),"r");
+		if (f) {
+			rr.dump_in(f,0,0,NULL,NULL);
+			fclose(f);
+		}
+	}
+
 
 	if (ang>0) {
 		rr.maxstarsize=rr.width*ang/60./360.;
@@ -967,6 +1607,7 @@ int main(int argc, char **argv)
 	if (pgc_file)   rr.catalogs.push(new Catalog("Principal Galaxy Catalog", pgc_file,   PrincipalGalaxy),1);
 	if (tycho_file) rr.catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file, Tycho2),         1);
 
+	//rr.catalogs.push(new Catalog("Custom Galaxy",     "galaxy.dat", CustomGalaxy), 1);
 
 	 //------set up windows...
 	anXApp app;

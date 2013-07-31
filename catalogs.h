@@ -41,6 +41,16 @@ class StarColor
 //------------------------------- RenderContext -----------------------------------
 class Catalog;
 
+enum RCurveType {
+	RAMP        =(1<<0),
+	BLOWOUT     =(1<<1),
+	INDEX_R     =(1<<2),
+	INDEX_G     =(1<<3),
+	INDEX_B     =(1<<4),
+	BIGSCALE    =(1<<5),
+    POINTOPACITY=(1<<6)
+};
+
 class RenderContext : public LaxFiles::DumpUtility
 {
   public:
@@ -52,7 +62,7 @@ class RenderContext : public LaxFiles::DumpUtility
 
 	int galactic;
 	int transparent;
-	double magnitude;
+	double magnitude; //initial hint for magnitude cutoff
 	double maxmagnitude;
 	double maxstarsize; //pixels of biggest star
 	double bigthreshhold; //magnitude < this get big treatment
@@ -75,13 +85,15 @@ class RenderContext : public LaxFiles::DumpUtility
 	double max_dec;
 
 
-	double minimum_magnitude;
-	double maximum_magnitude;
+	double minimum_magnitude; //dimmest (numerically > max)
+	double maximum_magnitude; //brightest
 
 	Laxkit::PtrStack<Catalog> catalogs;
-	Catalog *catalog; //current
+	Catalog *catalog; //current, set sequentially to each catalogs during Render()
 
 	RenderContext();
+	virtual ~RenderContext();
+	virtual void Reset(int which);
 
 	virtual void dump_out(FILE *f,int indent,int what,Laxkit::anObject *context);
     virtual LaxFiles::Attribute *dump_out_atts(LaxFiles::Attribute *att,int what,Laxkit::anObject *context);
@@ -93,11 +105,12 @@ class RenderContext : public LaxFiles::DumpUtility
 //------------------------------- Catalog -----------------------------------
 enum CatalogTypes
 {
+	Unknown,
 	Tycho2,
 	PrincipalGalaxy,
 	RandomMemory,
 	CustomStars,
-	CustomGalaxies
+	CustomGalaxy
 };
 
 class Catalog
@@ -108,23 +121,31 @@ class Catalog
 	char *filename;
 	CatalogTypes type;
 	
-	int *magnitude_distribution;
-	int nummags;
+	int visible;
+
+	 //stats
 	double minimum_magnitude;
 	double maximum_magnitude;
+	int numstars;
 
-	int min_mag_cutoff;
-	int max_mag_cutoff;
+	 //subset
+	double min_mag_cutoff;
+	double max_mag_cutoff;
 
 	Catalog(const char *nname, const char *nfile, CatalogTypes ntype);
 	virtual ~Catalog();
 
+	virtual const char *TypeName();
 	virtual int Render(RenderContext *context);
 	//virtual int GetStats() = 0;
 
 	virtual int OpenCatalog();
 	//virtual int GetLine(int &object_type, double &asc, double &dec, double &bmag, double &vmag) = 0;
 	virtual int CloseCatalog();
+
+	virtual void dump_out(FILE *f,int indent,int what,Laxkit::anObject *context);
+    virtual LaxFiles::Attribute *dump_out_atts(LaxFiles::Attribute *att,int what,Laxkit::anObject *context);
+    virtual void dump_in_atts(LaxFiles::Attribute *att,int flag,Laxkit::anObject *context);
 };
 
 class RandomCatalog : public Catalog
@@ -155,6 +176,7 @@ double dms(const char *pos);
 double hms(const char *pos);
 
 int Render(RenderContext *context);
+int Process_Galaxy(RenderContext *rr);
 int Process_PGC(RenderContext *context);
 int Process_Tycho(RenderContext *context);
 
