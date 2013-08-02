@@ -2013,6 +2013,7 @@ void InitOptions()
 		                                "halo diameter to star diameter",                              0, "7");
 	options.Add("transparent",  'T', 0, "Put stars on transparency rather than a black background",    0, NULL);
 	options.Add("galactic",     'g', 0, "Make it so the Milky Way is horizontal",                      0, NULL);
+	options.Add("render-only",  'r', 0, "Render only from other options, then exit without windows",   0, NULL);
 
 	options.Add("help",         'h', 0, "Show help and exit",                                          0, NULL);
 	options.Add("help-html",    'l', 0, "Output help in html form and exit",                           0, NULL);
@@ -2047,6 +2048,7 @@ int main(int argc, char **argv)
 	const char *pgc_file=NULL;
 	double ang=-1;
 	double alphaamp=0;
+	int nox=0;
 
 
     LaxOption *o;
@@ -2065,6 +2067,10 @@ int main(int argc, char **argv)
 				exit(0);
 			  }
 
+            case 'r': {
+				nox=1;
+				break;
+			  }
             case 'w': {
 				rr.width=strtol(o->arg(),NULL,10);
 				if (rr.width<2) { cerr <<"Badth width value!"<<endl; exit(1); }
@@ -2134,8 +2140,9 @@ int main(int argc, char **argv)
 			makestr(rr.projectfile,o->arg());
 		}
 	}
-	//DBG cerr <<"Initial context:"<<endl;
-	//DBG rr.dump_out(stdout,0,0,NULL);
+
+	DBG cout <<"Initial context:"<<endl;
+	DBG rr.dump_out(stdout,0,0,NULL);
 
 
 
@@ -2158,6 +2165,17 @@ int main(int argc, char **argv)
 	if (tycho_file) rr.catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file, Tycho2),         1);
 
 	//rr.catalogs.push(new Catalog("Custom Galaxy",     "galaxy.dat", CustomGalaxy), 1);
+
+	
+	if (nox) {
+		if (!rr.catalogs.n) {
+			cerr <<"No catalogs! Doing nothing."<<endl;
+			exit(1);
+		}
+		rr.Render();
+		exit(0);
+	}
+	
 
 	 //------set up windows...
 	anXApp app;

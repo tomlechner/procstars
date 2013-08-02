@@ -33,6 +33,8 @@ using namespace Magick;
 #define AVG(a,b, r) ((a*r+b*(255-r))/255)
 
 
+#define DBG
+
 //------------------------------- RenderContext -----------------------------------
 /*! \class RenderContext
  * Info about how, what, and where to render.
@@ -159,6 +161,8 @@ void RenderContext::RefreshStats()
 //! --- Actual Render and Export Function ---
 int RenderContext::Render()
 {
+	DBG cout <<"Render with config:"<<endl;
+	DBG dump_out(stdout,0,0,NULL);
 
 	cout <<"Render to: "<<filename<<endl;
 	cout <<"Width:     "<<width<<endl;
@@ -419,6 +423,13 @@ void RenderContext::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *con
 		}
 	}
 
+	bigscale    ->RefreshLookup(256, 1,bigscale->ymax);
+	pointopacity->RefreshLookup(256, 0,255);
+	ramp        ->RefreshLookup(256, 0,255);
+	blowout     ->RefreshLookup(256, 0,255);
+	index_r     ->RefreshLookup(256, 0,255);
+	index_g     ->RefreshLookup(256, 0,255);
+	index_b     ->RefreshLookup(256, 0,255);
 
 
 
