@@ -51,6 +51,27 @@ enum RCurveType {
     POINTOPACITY=(1<<6)
 };
 
+//------------------------------- CatalogStats -----------------------------------
+
+class CatalogStats
+{
+  public:
+	int numstars;
+	int numgalaxies;
+	int numnebulae;
+	int numother;
+
+	int mags[50];
+	int zeromag;
+	double magmin;//by real number, not brightness
+	double magmax;//by real number, not brightness
+
+	double rendertime;
+	
+	CatalogStats();
+	void Zero();
+};
+
 class RenderContext : public LaxFiles::DumpUtility
 {
   public:
@@ -91,6 +112,10 @@ class RenderContext : public LaxFiles::DumpUtility
 	Laxkit::PtrStack<Catalog> catalogs;
 	Catalog *catalog; //current, set sequentially to each catalogs during Render()
 
+	CatalogStats stats;
+	virtual void RefreshStats();
+	virtual int Render();
+
 	RenderContext();
 	virtual ~RenderContext();
 	virtual void Reset(int which);
@@ -113,6 +138,26 @@ enum CatalogTypes
 	CustomGalaxy
 };
 
+class StarPoint
+{
+  public:
+	int type;
+	double index;
+	double mag;
+	double asc;
+	double dec;
+
+	StarPoint(double nindex, double nmag, double nasc, double ndec, int ntype=0)
+		: type(ntype), index(nindex), mag(nmag), asc(nasc), dec(ndec)
+	  {}
+	void Set(double nindex, double nmag, double nasc, double ndec, int ntype);
+
+ 	 //galaxy info:
+	//double majoraxis;
+	//double minoraxis;
+	//double tilt;
+};
+
 class Catalog
 {
   protected:
@@ -120,24 +165,29 @@ class Catalog
 	char *name;
 	char *filename;
 	CatalogTypes type;
+	CatalogStats stats;
 	
 	int visible;
 
 	 //stats
 	double minimum_magnitude;
 	double maximum_magnitude;
-	int numstars;
 
 	 //subset
 	double min_mag_cutoff;
 	double max_mag_cutoff;
+
+	int max_points_in_memory;
+	int num_cat_points;
+	Laxkit::PtrStack<StarPoint> points;
+
 
 	Catalog(const char *nname, const char *nfile, CatalogTypes ntype);
 	virtual ~Catalog();
 
 	virtual const char *TypeName();
 	virtual int Render(RenderContext *context);
-	//virtual int GetStats() = 0;
+	virtual int RefreshStats(RenderContext *context, int buildpoints);
 
 	virtual int OpenCatalog();
 	//virtual int GetLine(int &object_type, double &asc, double &dec, double &bmag, double &vmag) = 0;
@@ -146,20 +196,27 @@ class Catalog
 	virtual void dump_out(FILE *f,int indent,int what,Laxkit::anObject *context);
     virtual LaxFiles::Attribute *dump_out_atts(LaxFiles::Attribute *att,int what,Laxkit::anObject *context);
     virtual void dump_in_atts(LaxFiles::Attribute *att,int flag,Laxkit::anObject *context);
+
+
+	int Process_Galaxy(RenderContext *rr, int statsonly, int buildpoints);
+	int Process_PGC(RenderContext *context, int statsonly, int buildpoints);
+	int Process_Tycho(RenderContext *context, int statsonly, int buildpoints);
 };
 
 class RandomCatalog : public Catalog
 {
   public:
+	int isspherical;
 	int numpoints;
 	double *color_index;
 	double *color_mag;
 	double *asc;
 	double *dec;
 
-	RandomCatalog(const char *nname, int num);
+	RandomCatalog(const char *nname, int num, int spherical);
 	virtual int Render(RenderContext *context);
 	virtual int Render(RenderContext *context, unsigned char *data,int ww,int hh);
+	virtual int RefreshStats(RenderContext *context, int buildpoints);
 
 	virtual int Repopulate(int num, int spherical);
 };
@@ -167,6 +224,7 @@ class RandomCatalog : public Catalog
 //------------------------------- Rendering Misc -----------------------------------
 
 flatvector Eq2Gal(double ra, double dec);
+flatvector Gal2Eq(double l, double b);
 void indexToRgb(RenderContext *rr, double index, double vmag, StarColor &color);
 void drawStar(RenderContext *rr, double ra, double dec, double vmag, double bmag);
 void drawStarSimple(RenderContext *context, double ra, double dec, double index, double vmag);
@@ -175,10 +233,6 @@ void CreateStockHalo(int w,double halosize, unsigned char *halo, const char *for
 double dms(const char *pos);
 double hms(const char *pos);
 
-int Render(RenderContext *context);
-int Process_Galaxy(RenderContext *rr);
-int Process_PGC(RenderContext *context);
-int Process_Tycho(RenderContext *context);
 
 
 
