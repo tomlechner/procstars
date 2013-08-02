@@ -56,6 +56,7 @@ Next, from this directory:
   cd laxkit
   ./configure
   make depends
+  make hidegarbage
   make
   cd ..
 
