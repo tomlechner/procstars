@@ -132,7 +132,8 @@ enum CatalogTypes
 {
 	Unknown,
 	Tycho2,
-	PrincipalGalaxy,
+	PrincipalGalaxy119,
+	PrincipalGalaxy237,
 	RandomMemory,
 	CustomStars,
 	CustomGalaxy
@@ -199,7 +200,7 @@ class Catalog
 
 
 	int Process_Galaxy(RenderContext *rr, int statsonly, int buildpoints);
-	int Process_PGC(RenderContext *context, int statsonly, int buildpoints);
+	int Process_PGC(RenderContext *context, int statsonly, int buildpoints, int revision);
 	int Process_Tycho(RenderContext *context, int statsonly, int buildpoints);
 };
 
@@ -207,11 +208,6 @@ class RandomCatalog : public Catalog
 {
   public:
 	int isspherical;
-	int numpoints;
-	double *color_index;
-	double *color_mag;
-	double *asc;
-	double *dec;
 
 	RandomCatalog(const char *nname, int num, int spherical);
 	virtual int Render(RenderContext *context);
@@ -219,6 +215,7 @@ class RandomCatalog : public Catalog
 	virtual int RefreshStats(RenderContext *context, int buildpoints);
 
 	virtual int Repopulate(int num, int spherical);
+	virtual int RepopulateFakeMilkyWay(int num);
 };
 
 //------------------------------- Rendering Misc -----------------------------------

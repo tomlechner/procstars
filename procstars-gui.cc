@@ -890,6 +890,7 @@ int CatalogWindow::MBUp(int x,int y,unsigned int state,const LaxMouse *d)
 
 int CatalogWindow::scan(int x,int y, int *element)
 {
+	int pad=5;
 	int xx=wholelist.e[4]->x()+pad;
 	int yy=wholelist.e[4]->y()+pad;
 	int textheight=app->defaultlaxfont->textheight();
@@ -913,7 +914,7 @@ int CatalogWindow::scan(int x,int y, int *element)
 	y-=textheight/2;
 
 	y/=textheight;
-	if (y>=0 && y<4) {
+	if (y>=0 && y<4) { //5 includes pgc 237
 		*element=y;
 		return -1;
 	}
@@ -970,10 +971,17 @@ int CatalogWindow::LBUp(int x,int y,unsigned int state,const LaxMouse *d)
                                 win_parent->object_id,"addtycho",
                                 FILES_OPEN_ONE));
 		} else if (e==3) {
-			 //add new tycho
-	    	app->rundialog(new FileDialog(NULL,"PGC","Load a Principal Galaxy Star Catalog", 0,
+			 //add new pgc 119
+	    	app->rundialog(new FileDialog(NULL,"PGC","Load a Principal Galaxies Catalog, rev 119", 0,
                                 0,0,0,0,1, 
-                                win_parent->object_id,"addpgc",
+                                win_parent->object_id,"addpgc119",
+                                FILES_OPEN_ONE));
+
+		} else if (e==4) {
+			 //add new pgc 237
+	    	app->rundialog(new FileDialog(NULL,"PGC","Load a Principal Galaxies Catalog, rev 119", 0,
+                                0,0,0,0,1, 
+                                win_parent->object_id,"addpgc237",
                                 FILES_OPEN_ONE));
 		}
 	}
@@ -1004,6 +1012,9 @@ int CatalogWindow::MouseMove(int x,int y,unsigned int state,const LaxMouse *d)
 
 	if (buttondown.isdown(d->id,MIDDLEBUTTON)) {
 		yoffset+=y-oy;
+		if (yoffset<0) yoffset=0;
+		//else if (yoffset+context->catologs.n*textheight+5.5*textheight>hh)
+		//	yoffset=hh-context->catologs.n*textheight+5.5*textheight;
 		needtodraw=1;
 		return 0;
 	}
@@ -1134,7 +1145,9 @@ void CatalogWindow::Refresh()
 	y+=textheight;
 	textout(this, "Tycho",-1, xx,y,LAX_LEFT|LAX_TOP);
 	y+=textheight;
-	textout(this, "PGC",-1, xx,y,LAX_LEFT|LAX_TOP);
+	textout(this, "PGC119",-1, xx,y,LAX_LEFT|LAX_TOP);
+	//y+=textheight;
+	//textout(this, "PGC237",-1, xx,y,LAX_LEFT|LAX_TOP);
 
 
 	needtodraw=0;
@@ -1360,8 +1373,14 @@ int MainWindow::Event(const EventData *e,const char *mes)
 		return 0;
 	}
 
-	if (!strcmp(mes,"addpgc")) {
-		context->catalogs.push(new Catalog("Principal Galaxy Catalog", m->str,   PrincipalGalaxy),1);
+	if (!strcmp(mes,"addpgc119")) {
+		context->catalogs.push(new Catalog("Principal Galaxy Catalog", m->str,   PrincipalGalaxy119),1);
+		catalogwindow->Needtodraw(1);
+		return 0;
+	}
+
+	if (!strcmp(mes,"addpgc237")) {
+		context->catalogs.push(new Catalog("Principal Galaxy Catalog", m->str,   PrincipalGalaxy237),1);
 		catalogwindow->Needtodraw(1);
 		return 0;
 	}
@@ -1537,12 +1556,18 @@ void MainWindow::UpdateWholePreview()
 			flatpoint p;
 			int r;
 			for (int c=0; c<context->catalogs.n; c++) {
+				if (!context->catalogs.e[c]->visible) continue;
 				for (int c2=0; c2<context->catalogs.e[c]->num_cat_points; c2++) {
 					asc=context->catalogs.e[c]->points.e[c2]->asc;
 					dec=context->catalogs.e[c]->points.e[c2]->dec;
 					mag=context->catalogs.e[c]->points.e[c2]->mag;
 					mag=(12-mag)/12; if (mag<.1) mag=.1;
 					mag*=255;
+
+					if (context->catalogs.e[c]->type==RandomMemory) {
+						asc*=360;
+						dec=dec*180-90;
+					}
 
 					if (context->galactic) {
 						p=Eq2Gal(radians(asc), radians(dec));
@@ -1637,13 +1662,21 @@ void MainWindow::UpdatePreview()
 		Catalog *cat;
 		int n=0;
 		flatpoint p;
+		previewcatalog.num_cat_points=0;
 		for (int c=0; c<context->catalogs.n; c++) {
 			cat=context->catalogs.e[c];
+			if (!cat->visible) continue;
+
 			for (int c2=0; c2<cat->num_cat_points; c2++) {
 				asc=cat->points.e[c2]->asc;
 				dec=cat->points.e[c2]->dec;
 				index=cat->points.e[c2]->index;
 				mag=cat->points.e[c2]->mag;
+
+				if (cat->type==RandomMemory) {
+					asc*=360;
+					dec=dec*180-90;
+				}
 
 				if (context->galactic) {
 					p=Eq2Gal(radians(asc), radians(dec));
@@ -2002,7 +2035,7 @@ void InitOptions()
 	options.Add("width",        'w', 1, "Width of equirectangular texture image",                      0, "8192");
 	options.Add("output-file",  'o', 1, "Filename for generated texture image (will save as tif)",     0, "file");
 	options.Add("catalog-file", 'c', 1, "File containing the Tycho 2 Star Catalog",                    0, "catalog");
-	options.Add("pgc-file",     'p', 1, "File containing the Principal Galaxy Catalog",                0, "catalog");
+	options.Add("pgc-file",     'p', 1, "File containing the Principal Galaxies Catalog (version 119)",0, "catalog");
 	options.Add("magnitude",    'm', 1, "Minimum brightness. stars in catalog are 0 (bright) "
 			                            "to 15 (very dim). 6 is dimmest to human naked eye.",          0, "15.1");
 	options.Add("maxstarsize",  's', 1, "Pixels wide of brightest star",0, "10");
@@ -2161,8 +2194,8 @@ int main(int argc, char **argv)
 
 
 	 //fill in up render context
-	if (pgc_file)   rr.catalogs.push(new Catalog("Principal Galaxy Catalog", pgc_file,   PrincipalGalaxy),1);
-	if (tycho_file) rr.catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file, Tycho2),         1);
+	if (pgc_file)   rr.catalogs.push(new Catalog("Principal Galaxies Catalog, 119", pgc_file,   PrincipalGalaxy119),1);
+	if (tycho_file) rr.catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file, Tycho2),            1);
 
 	//rr.catalogs.push(new Catalog("Custom Galaxy",     "galaxy.dat", CustomGalaxy), 1);
 

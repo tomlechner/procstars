@@ -337,7 +337,8 @@ LaxFiles::Attribute *RenderContext::dump_out_atts(LaxFiles::Attribute *att,int w
 
 void RenderContext::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *context)
 {
-	const char *pgc_file=NULL;
+	const char *pgc_file_119=NULL;
+	const char *pgc_file_237=NULL;
 	const char *tycho_file=NULL;
 
     char *name,*value;
@@ -354,8 +355,11 @@ void RenderContext::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *con
 		} else if (!strcmp(name,"height")) {
 			LongAttribute(value,&height,NULL);
 
-		} else if (!strcmp(name,"principal_galaxy_catalog")) {
-			pgc_file=value;
+		} else if (!strcmp(name,"principal_galaxy_catalog_237")) {
+			pgc_file_237=value;
+
+		} else if (!strcmp(name,"principal_galaxy_catalog_119")) {
+			pgc_file_119=value;
 
 		} else if (!strcmp(name,"tycho_2_star_catalog")) {
 			tycho_file=value;
@@ -433,8 +437,9 @@ void RenderContext::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *con
 
 
 
-	if (pgc_file)   catalogs.push(new Catalog("Principal Galaxy Catalog", pgc_file,   PrincipalGalaxy),1);
-	if (tycho_file) catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file, Tycho2),         1);
+	if (pgc_file_119) catalogs.push(new Catalog("Principal Galaxies Catalog (119)", pgc_file_119, PrincipalGalaxy119),1);
+	if (pgc_file_237) catalogs.push(new Catalog("Principal Galaxy Catalog (237)", pgc_file_237, PrincipalGalaxy237),1);
+	if (tycho_file)   catalogs.push(new Catalog("Tycho 2 Star Catalog",     tycho_file,   Tycho2),            1);
 }
 
  
@@ -463,13 +468,9 @@ RandomCatalog::RandomCatalog(const char *nname, int num, int spherical)
 	isspherical=spherical;
 
 	if (num<=0) num=1000;
-	numpoints=num;
-	color_index=new double[numpoints];
-	color_mag  =new double[numpoints];
-	asc        =new double[numpoints];
-	dec        =new double[numpoints];
 
-	Repopulate(numpoints,isspherical);
+	Repopulate(num,isspherical);
+	//RepopulateFakeMilkyWay(num);
 }
 
 //! Convert cartesian space to spherical surface. (radians)
@@ -479,26 +480,55 @@ void rect_to_sphere(double x,double y,double z, double *asc,double *dec)
 	*dec=atan(z/sqrt(x*x+y*y));
 }
 
+int RandomCatalog::RepopulateFakeMilkyWay(int num)
+{
+	isspherical=1;
+	num_cat_points=0;
+
+	 //make fake milky way
+	double asc,dec;
+	flatpoint p;
+	double dd=1.5;
+
+	for (int c=0; c<num; c++) {
+		if (c>=points.n) {
+			points.push(new StarPoint(0,0,0,0,0));
+			num_cat_points=c+1;
+		}
+
+		//normalized:
+		asc=drand48();
+		dec=tan(drand48()*2*dd-dd)/tan(dd); //-1..1
+		dec=dec*.5+.5;
+
+		//spherical:
+		//asc=drand48()*360;
+		//dec=tan(drand48()*2*dd-dd)/tan(dd)*180 - 90;
+
+		points[c]->asc=asc;
+		points[c]->dec=dec;
+		points[c]->index=drand48()*(2.5)-.5;
+		points[c]->mag  =drand48()*(15);
+	}
+
+	return num_cat_points;
+}
+
 int RandomCatalog::Repopulate(int num, int spherical)
 {
 	isspherical=spherical;
 
-	if (num!=numpoints) {
-		numpoints=num;
-		delete[] color_index;
-		delete[] color_mag;
-		delete[] asc;
-		delete[] dec;
-		color_index=new double[numpoints];
-		color_mag  =new double[numpoints];
-		asc        =new double[numpoints];
-		dec        =new double[numpoints];
-	}
 
 	double x,y,z;
-	for (int c=0; c<numpoints; c++) {
-		color_index[c]=drand48()*(2.5)-.5;
-		color_mag[c]  =drand48()*(15);
+	num_cat_points=0;
+	for (int c=0; c<num; c++) {
+		if (c>=points.n) {
+			points.push(new StarPoint(0,0,0,0,0));
+			num_cat_points=c+1;
+		}
+
+		points[c]->index=drand48()*(2.5)-.5;
+		points[c]->mag  =drand48()*(15);
 		
 		 //create random point in unit cube, map to sphere..
 		 //creates even distribution compared to just random asc/dec
@@ -510,23 +540,23 @@ int RandomCatalog::Repopulate(int num, int spherical)
 			if (x*x+y*y+z*z>1) { c--; continue; } //make a smooth spherical distribution
 
 			if (x==0 && y==0 && z==0) x=1;
-			rect_to_sphere(x,y,z, &asc[c], &dec[c]);
+			rect_to_sphere(x,y,z, &points[c]->asc, &points[c]->dec);
 			//makes asc [-180..180], dec [-90..90] but in radians
 
-			asc[c]/=2*M_PI; //convert to unit range
-			asc[c]+=.5;
-			dec[c]/=M_PI; //convert to unit range
-			dec[c]+=.5;
+			points[c]->asc/=2*M_PI; //convert to unit range
+			points[c]->asc+=.5;
+			points[c]->dec/=M_PI; //convert to unit range
+			points[c]->dec+=.5;
 
 
 		} else {
 			 //for simple rectilinear:
-			asc[c]=drand48();
-			dec[c]=drand48();
+			points[c]->asc=drand48();
+			points[c]->dec=drand48();
 		}
 	}
 
-	return numpoints;
+	return num_cat_points;
 }
 
 int RandomCatalog::Render(RenderContext *context)
@@ -538,17 +568,17 @@ int RandomCatalog::Render(RenderContext *context)
 	double bmag;
 
 
-	for (int c=0; c<numpoints; c++) {
+	for (int c=0; c<num_cat_points; c++) {
 
-		vmag  = color_mag[c];
-		index = color_index[c];
+		vmag  = points.e[c]->mag;
+		index = points.e[c]->index;
 		bmag  = index+vmag;
-		Ra    = asc[c]*360;
-	 	Dec   = dec[c]*180-90;
+		Ra    = points.e[c]->asc*360;
+		Dec   = points.e[c]->dec*180-90;
 
 		if (vmag>context->minimum_magnitude || vmag<context->maximum_magnitude) continue;
 
-		drawStar(context, Ra, Dec, bmag, vmag);
+		drawStar(context, Ra, Dec, vmag, bmag);
 	}
 
 	return 0;
@@ -573,30 +603,16 @@ int RandomCatalog::Render(RenderContext *context, unsigned char *data,int ww,int
 	context->width =ww;
 	context->height=hh;
 
-	if (num_cat_points) {
-		for (int c=0; c<num_cat_points; c++) {
+	for (int c=0; c<num_cat_points; c++) {
 
-			vmag  = points.e[c]->mag;
-			index = points.e[c]->index;
-			Ra    = points.e[c]->asc;
-			Dec   = points.e[c]->dec;
+		vmag  = points.e[c]->mag;
+		index = points.e[c]->index;
+		Ra    = points.e[c]->asc;
+		Dec   = points.e[c]->dec;
 
-			if (vmag>context->minimum_magnitude || vmag<context->maximum_magnitude) continue;
+		if (vmag>context->minimum_magnitude || vmag<context->maximum_magnitude) continue;
 
-			drawStarSimple(context, Ra, Dec, index, vmag);
-		}
-	} else {
-		for (int c=0; c<numpoints; c++) {
-
-			vmag  = color_mag[c];
-			index = color_index[c];
-			Ra    = asc[c];
-			Dec   = dec[c];
-
-			if (vmag>context->minimum_magnitude || vmag<context->maximum_magnitude) continue;
-
-			drawStarSimple(context, Ra, Dec, index, vmag);
-		}
+		drawStarSimple(context, Ra, Dec, index, vmag);
 	}
 
 
@@ -626,12 +642,12 @@ int RandomCatalog::RefreshStats(RenderContext *context, int buildpoints)
 	int mags[50];
 	memset(mags,0,50*sizeof(int));
 
-	for (int c=0; c<numpoints; c++) {
+	for (int c=0; c<num_cat_points; c++) {
 
-		vmag  = color_mag[c];
-		//index = color_index[c];
-		//Ra    = asc[c];
-	 	//Dec   = dec[c];
+		vmag  = points.e[c]->mag;
+		//index = points.e[c]->index;
+		//Ra    = points.e[c]->asc;
+		//Dec   = points.e[c]->dec;
 
 		if (vmag>context->minimum_magnitude || vmag<context->maximum_magnitude) continue;
 
@@ -734,7 +750,8 @@ Catalog::~Catalog()
 const char *Catalog::TypeName()
 {
 	if (type==Tycho2)          return "Tycho2";
-	if (type==PrincipalGalaxy) return "PrincipalGalaxy";
+	if (type==PrincipalGalaxy119) return "PrincipalGalaxy119";
+	if (type==PrincipalGalaxy237) return "PrincipalGalaxy237";
 	if (type==RandomMemory)    return "RandomMemory";
 	if (type==CustomStars)     return "CustomStars";
 	if (type==CustomGalaxy)    return "CustomGalaxy";
@@ -794,7 +811,8 @@ void Catalog::dump_in_atts(LaxFiles::Attribute *att,int flag,anObject *context)
 
 		} else if (!strcmp(aname,"type")) {
 			if (!strcmp(value,"Tycho2")) type=Tycho2;
-			else if (!strcmp(value,"PrincipalGalaxy")) type=PrincipalGalaxy;
+			else if (!strcmp(value,"PrincipalGalaxy119")) type=PrincipalGalaxy119;
+			else if (!strcmp(value,"PrincipalGalaxy237")) type=PrincipalGalaxy237;
 			//other types are subclasses...?
 
 		} else if (!strcmp(aname,"minimum_magnitude")) {
@@ -853,7 +871,8 @@ int Catalog::CloseCatalog()
 int Catalog::Render(RenderContext *context)
 {
 	if (type==CustomGalaxy)    return Process_Galaxy(context,0,0);
-	if (type==PrincipalGalaxy) return Process_PGC(context,0,0);
+	if (type==PrincipalGalaxy119) return Process_PGC(context,0,0, 119);
+	if (type==PrincipalGalaxy237) return Process_PGC(context,0,0, 237);
 	if (type==Tycho2)          return Process_Tycho(context,0,0);
 
 	return 1;
@@ -862,7 +881,8 @@ int Catalog::Render(RenderContext *context)
 int Catalog::RefreshStats(RenderContext *context, int buildpoints)
 {
 	if (type==CustomGalaxy)    return Process_Galaxy(context,1, buildpoints);
-	if (type==PrincipalGalaxy) return Process_PGC(context,1, buildpoints);
+	if (type==PrincipalGalaxy119) return Process_PGC(context,1, buildpoints, 119);
+	if (type==PrincipalGalaxy237) return Process_PGC(context,1, buildpoints, 237);
 	if (type==Tycho2)          return Process_Tycho(context,1, buildpoints);
 
 	return 0;
@@ -961,7 +981,7 @@ int Catalog::Process_Galaxy(RenderContext *rr, int statsonly, int buildpoints)
 
 
 //------------------------- Principal Galaxy Catalog processing ---------------------------
-int Catalog::Process_PGC(RenderContext *rr, int statsonly, int buildpoints)
+int Catalog::Process_PGC(RenderContext *rr, int statsonly, int buildpoints, int revision)
 {
 	const char *pgc_file=filename;
 	if (!pgc_file) return 1;
@@ -982,6 +1002,32 @@ int Catalog::Process_PGC(RenderContext *rr, int statsonly, int buildpoints)
 
 	int curtime=times(NULL);
 
+	//default version 119 values:
+	int byte_Ra=6;
+	int byte_Dec=14;
+	int byte_mag=59;
+	//int byte_type=39;
+	//int byte_major=43;
+	//int byte_minor=51;
+	//int byte_angle=73;
+
+	if (revision==237) {
+		byte_Ra=12;
+		byte_Dec=20;
+		//byte_type=31;
+		//byte_major=36; //label: logD25, units: 0.1arcmin
+		//byte_minor=50; //label: logR25, ==log(majoraxis/minoraxis)
+		//byte_angle=63;//
+
+		byte_mag=-1; //*****major axis has: Apparent diameter in log scale (D in 0.1arcmin) converted to the
+				     //                     RC3 system at the isophote 25B-mag/arcsec^2^ (section 3);
+					 //an isophote is a contour line of the same brightness
+	} 
+
+
+
+
+
 	int numgalaxies=0;
 	if (pgc_file) {
 		char *line=NULL;
@@ -1001,9 +1047,9 @@ int Catalog::Process_PGC(RenderContext *rr, int statsonly, int buildpoints)
 			if (line[59]==' ') continue; //no magnitude data on this line
 
 			 //the catalog lines are delimited by '|' characters, but also arranged on strict byte widths
-			Ra   = hms(line+6);          // RA hours-min-sec,        bytes 7-14
-			Dec  = dms(line+14);         //DEC degrees-min-sec,      bytes 15-21
-			vmag = strtod(line+59,NULL); //overall visual magnitude, bytes 60-63
+			Ra   = hms(line+byte_Ra);          // RA hours-min-sec,        bytes 7-14
+			Dec  = dms(line+byte_Dec);         //DEC degrees-min-sec,      bytes 15-21
+			vmag = strtod(line+byte_mag,NULL); //overall visual magnitude, bytes 60-63
 			bmag = vmag+.2; //makes index refer to a slightly blue object
 
 			// *** type of galaxy, bytes 40-43
@@ -1403,7 +1449,7 @@ void ellipse(RenderContext *rr, double x,double y, double xs,double ys, StarColo
 
 /**
  * This draws a pixel or small circle to the screen, in a simple rectilinear way.
- * ra and dec are assumed to be in range 0..1.
+ * ra and dec are assumed to be in range 0..1, and mapped to context->width and height.
  */
 void drawStarSimple(RenderContext *context, double ra, double dec, double index, double vmag)
 {
@@ -1447,6 +1493,7 @@ void drawStarSimple(RenderContext *context, double ra, double dec, double index,
 
 /**
  * This draws a pixel or small circle to the screen.
+ * ra and dec are in range [0..360] and [-90..90], mapped to context->width and height.
  */
 void drawStar(RenderContext *context, double ra, double dec, double vmag, double bmag)
 {
