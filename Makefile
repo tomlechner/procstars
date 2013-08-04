@@ -32,6 +32,9 @@ LDFLAGS= -L/usr/X11R6/lib -lm  -lGraphicsMagick++
 
 
 
+procstars-gui: lax catalogs.o procstars-gui.o
+	g++  $(LDFLAGS) $(LAXLDFLAGS) $@.o catalogs.o -llaxkit $(CPPFLAGS)  -o $@
+
 procstars: procstars.cc
 	g++ procstars.cc $(LDFLAGS) $(CPPFLAGS) -o $@
 
@@ -40,9 +43,6 @@ subset: subset.cc
 
 galaxymaker: lax galaxymaker.cc
 	g++ $(LAXDIR)/vectors.o $@.cc $(LDFLAGS) $(CPPFLAGS) -o $@
-
-procstars-gui: lax catalogs.o procstars-gui.o
-	g++  $(LDFLAGS) $(LAXLDFLAGS) $@.o catalogs.o -llaxkit $(CPPFLAGS)  -o $@
 
 test: test.cc
 	g++  test.cc $(LDFLAGS) $(CPPFLAGS) -o $@

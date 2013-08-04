@@ -11,6 +11,10 @@
 
 #include <lax/strmanip.h>
 
+
+#include <lax/laximages.h>
+
+
 #include <lax/lists.cc>
 
 
@@ -55,7 +59,7 @@ RenderContext::RenderContext()
 
 	maxstarsize  =20; //pixels of biggest star
 	bigthreshhold=6; //magnitude < this get big treatment
-	maximum_magnitude=-1;
+	maximum_magnitude=0;
 	minimum_magnitude=18;
 
 	min_asc=0;
@@ -66,6 +70,7 @@ RenderContext::RenderContext()
 	usehalo  =5;
 	halo     =NULL;
 	halowidth=0;
+	halotype=0;
 
 	data=NULL;
 	catalog=NULL;
@@ -131,6 +136,63 @@ void RenderContext::Reset(int which)
 	}
 }
 
+void RenderContext::InstallHaloImage(const char *file)
+{
+	cout <<"Installing halo file: "<<file<<endl;
+	//cerr <<" *** FAIL for imlib based when no x yet!! must rewrite"<<endl;
+	return;
+
+	Image image(file);
+	if (image.rows()!=image.columns()) {
+		cerr <<" Halo image must be same width and height. Ignoring."<<endl;
+		return;
+	}
+
+	halowidth=image.rows();
+
+	halotype=1;
+	if (halo) delete[] halo;
+	halo=new unsigned char[halowidth*halowidth*4];
+
+	image.write(0,0, halowidth,halowidth,"BGRA",CharPixel, halo);
+
+
+//	-------imlib based:--------------------
+//	LaxImage *img=load_image(file); // *** FAIL for imlib based when no x
+//	if (!img) return;
+//	if (img->w()!=img->h()) {
+//		img->dec_count();
+//		cerr <<" Halo image must be same width and height. Ignoring."<<endl;
+//	}
+//
+//	if (halo) delete[] halo;
+//	halotype=1;
+//	unsigned char *hfile=img->getImageBuffer();
+//
+//	halowidth=img->w();
+//	halo=new unsigned char[halowidth*halowidth*4];
+//	memcpy(halo, hfile, halowidth*halowidth*4);
+//
+//	img->doneWithBuffer(hfile);
+//	img->dec_count();
+
+
+//  ---debug write out:
+//	const char *saveto="halo.png";
+//	if (saveto) {
+//		Image haloimage;
+//
+//		int usecolor=1;
+//		int w=halowidth;
+//		if (usecolor) haloimage.read(w,w,"BGRA",CharPixel,halo);
+//		else haloimage.read(w,w,"I",CharPixel,halo);
+//
+//		haloimage.magick("PNG");
+//		haloimage.write(saveto);
+//	}
+
+}
+
 void RenderContext::RefreshStats()
 {
 	stats.Zero();
@@ -168,15 +230,17 @@ int RenderContext::Render()
 	cout <<"Width:     "<<width<<endl;
 	cout <<"Height:    "<<height<<endl;
 
+	//InstallHaloImage("smiley.png"); // ***
+
 	 //create halo image if necessary
 	if (!halo) {
 		halowidth=maxstarsize*usehalo;
 		halo=new unsigned char[halowidth*halowidth];
+		halotype=0;
 		CreateStockHalo(halowidth, usehalo, halo, "g",
 						ramp,blowout,NULL);
 						//ramp,blowout,"halo.png");
 	}
-
 
 	 //-----allocate star image data
 	if (!data) {
@@ -469,8 +533,8 @@ RandomCatalog::RandomCatalog(const char *nname, int num, int spherical)
 
 	if (num<=0) num=1000;
 
-	Repopulate(num,isspherical);
-	//RepopulateFakeMilkyWay(num);
+	if (spherical==2 || spherical==3) RepopulateFakeMilkyWay(num,spherical==2?0:1);
+	else Repopulate(num,isspherical);
 }
 
 //! Convert cartesian space to spherical surface. (radians)
@@ -480,7 +544,7 @@ void rect_to_sphere(double x,double y,double z, double *asc,double *dec)
 	*dec=atan(z/sqrt(x*x+y*y));
 }
 
-int RandomCatalog::RepopulateFakeMilkyWay(int num)
+int RandomCatalog::RepopulateFakeMilkyWay(int num,int galactic)
 {
 	isspherical=1;
 	num_cat_points=0;
@@ -497,9 +561,15 @@ int RandomCatalog::RepopulateFakeMilkyWay(int num)
 		}
 
 		//normalized:
-		asc=drand48();
+		asc=drand48(); //this creates bunching at the poles
 		dec=tan(drand48()*2*dd-dd)/tan(dd); //-1..1
 		dec=dec*.5+.5;
+
+		//if (!galactic) {
+			//p=Gal2Eq(asc*2*M_PI, dec*M_PI-M_PI/2);
+			//asc=p.x/360;
+			//dec=p.y/180+.5;
+		//}
 
 		//spherical:
 		//asc=drand48()*360;
@@ -737,6 +807,7 @@ Catalog::Catalog(const char *nname, const char *nfile, CatalogTypes ntype)
 	num_cat_points=0;
 
 	visible=1;
+	autoadded=0;
 
 	points.Delta(20000);
 }
@@ -1305,10 +1376,36 @@ void blendPixel(RenderContext *context, int x,int y, StarColor &color)
 	b+=bb; if (b>255) b=255;
 	a+=aa; if (a>255) a=255;
 
-	//context->data[i  ]=r;
-	//context->data[i+1]=g;
-	//context->data[i+2]=b;
-	//context->data[i+3]=a;
+	context->data[i  ]=b;
+	context->data[i+1]=g;
+	context->data[i+2]=r;
+	context->data[i+3]=a;
+
+	//cerr <<"blend rgba  "<<r<<' '<<g<<' '<<b<<' '<<a<<endl;
+}
+
+/*! New color= (oldcolor)*(1-a) + newcolor*a
+ */
+void alphaOverPixel(RenderContext *context, int x,int y, StarColor &color)
+{
+	if (x<0 || x>=context->width || y<0 || y>=context->height) return;
+
+	int i=y*context->width*4+x*4;
+	int b=context->data[i+0];
+	int g=context->data[i+1];
+	int r=context->data[i+2];
+	int a=context->data[i+3];
+
+	double aaa=color.alphaf();
+	int aa=aaa*255;
+	int rr=aaa*color.red();
+	int gg=aaa*color.green();
+	int bb=aaa*color.blue();
+
+	r=r*(1-aaa) + rr*aaa;
+	g=g*(1-aaa) + gg*aaa;
+	b=b*(1-aaa) + bb*aaa;
+	a+=aa; if (a>255) a=255;
 
 	context->data[i  ]=b;
 	context->data[i+1]=g;
@@ -1324,7 +1421,7 @@ void dataEllipse(RenderContext *context, int xp,int yp, double xr,double yr, Sta
 
 	if (context->usehalo) {
 		 //may halo reference to data
-		 //rendered on in a very naive way, just rectangular copy, no additional span cocontextection
+		 //rendered on in a very naive way, just rectangular copy, no additional span correction
 
 		StarColor col;
 		int i;
@@ -1341,41 +1438,43 @@ void dataEllipse(RenderContext *context, int xp,int yp, double xr,double yr, Sta
 			hy=sy/(2.*yr)*context->halowidth;
 			hx=sx/(2.*xr)*context->halowidth;
 			i=hy*context->halowidth + hx;
-			a=context->halo[i]/255.;//so this is the halo alpha 0..1
-				//".oO8#"
 
-			r=color.redf();
-			g=color.greenf();
-			b=color.bluef();
+			if (context->halotype!=0) {
+				 //if custom color halo image, map image in alpha over
+				i=i*4;
+				b =context->halo[i++];
+				g =context->halo[i++];
+				r =context->halo[i++];
+				a =context->halo[i++];
+				col.alpha(a);
 
-			//-------------------------------
-			col.alpha(a*color.alpha());
-			aa=context->blowout->lookup[int(a*255)];
-			//cerr <<"blowout lookup "<<int(a*255)<<" -> "<<aa<<endl;
+				col.red  (r);
+				col.green(g);
+				col.blue (b);
 
-			r=r*(255-aa) + (aa);
-			g=g*(255-aa) + (aa);
-			b=b*(255-aa) + (aa);
+				alphaOverPixel(context, x,y, col);
+			} else {
+				 //normal additive star blending
+				r=color.redf();
+				g=color.greenf();
+				b=color.bluef();
+
+				a=context->halo[i]/255.;//so this is the halo alpha 0..1
+
+				col.alpha(a*color.alpha());
+				aa=context->blowout->lookup[int(a*255)];
+
+				r=r*(255-aa) + (aa);
+				g=g*(255-aa) + (aa);
+				b=b*(255-aa) + (aa);
 			
-			col.red  (r);
-			col.green(g);
-			col.blue (b);
-			//----------------------------------
-			//col.alpha(a*color.alpha());
-//			col.alphaf(a * (1-.25*color.alphaf()));
-//			aa=context->blowout->lookup[a*255];
-//
-//			if (a>.5) { //apply blowout with white
-//				r=r*(1-a) + 1*(a);
-//				g=g*(1-a) + 1*(a);
-//				b=b*(1-a) + 1*(a);
-//			}
-//			col.redf  (r);
-//			col.greenf(g);
-//			col.bluef (b);
-			//----------------------------------
+				col.red  (r);
+				col.green(g);
+				col.blue (b);
 
-			blendPixel(context, x,y, col);
+				blendPixel(context, x,y, col);
+			}
+
 		  }
 		  //cecontext <<endl;
 		}
@@ -1665,7 +1764,7 @@ double pole_ra = radians(192.859508);
 double pole_dec = radians(27.128336);
 double posangle = radians(122.932-90.0);
 
-//! Decimal inputs, decimal outputs.
+//! Radians inputs, decimal outputs.
 flatvector Gal2Eq(double l, double b)
 {
 	 //North galactic pole (J2000) -- according to Wikipedia

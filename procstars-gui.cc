@@ -5,20 +5,15 @@
 // This program creates star globes from the wonderful Tycho2 star catalog,
 // and also the Principal Galaxy Catalog.
 //
-// You can run with or with the gui.
+// You can run with or without the gui.
 //
 // Usage:
-//  ./procstars  -c ../Tycho.dat  -w32768  -H 7 -m12 -S 10 -a 40 -g
-//  ./procstars  -c ../Tycho.cat  -S 6 -m 12 -s 12 -w 32768
-//  ./procstars  -c ../Tycho.cat  -S 6 -m 12 -s 6 -w 16384
-//  ./procstars  -c ../Tycho.cat  -o stars.tif
+//  ./procstars-gui  -c ../Tycho.dat  -w32768  -H 7 -m12 -S 10 -a 40 -g
+//  ./procstars-gui  -c ../Tycho.cat  -S 6 -m 12 -s 12 -w 32768
+//  ./procstars-gui  -c ../Tycho.cat  -S 6 -m 12 -s 6 -w 16384
+//  ./procstars-gui  -c ../Tycho.cat  -o stars.tif
+//  ./procstars-gui  -c ../Tycho.cat  -o stars.tif --render-only
 //
-//
-//
-// This is released with the MIT license.
-// This was first inspired by a generator written by Nathan Bergey from 01-22-2010,
-// which he released CC Attribution 3.0 as Processing code, which processed the 
-// Tycho 2 catalog.
 //
 //
 // Fyi:
@@ -30,6 +25,11 @@
 // The sun is about magnitude -26.74, and takes up about 32 arc minutes.
 // The dimmest objects observed so far in human visible wavelengths is about magnitude 36.
 // The Andromeda Galaxy, if it were completely visible to the human eye, would take up about 6 degrees
+//
+//
+// This project was first inspired by a generator written by Nathan Bergey from 01-22-2010,
+// which he released CC Attribution 3.0 as Processing code, which processed the 
+// Tycho 2 catalog. This has been rewritten and expanded to its current state.
 //
 //
 // The MIT License (MIT)
@@ -104,6 +104,7 @@
 #define constrain(v, min,max) (v<min ? min : (v>max ? max : v))
 #define radians(deg) (deg/180.*M_PI)
 #define degrees(rad) (rad*180./M_PI)
+#define sgn(a) (a>0?1:(a<0?-1:0))
 
 
 #define DBG
@@ -248,13 +249,13 @@ void MagnitudeSelectWindow::Refresh()
 
 	 //usemax
 	p=pos(usemax);
-	sprintf(scratch,"%.3g",usemax);
+	sprintf(scratch,"%.1f",usemax);
 	textout(this, scratch,-1, win_w/2-2*pad-textheight,p, LAX_RIGHT|LAX_VCENTER);
 	draw_line(this, win_w/2-pad-textheight,p, win_w/2+pad,p);
 
 	 //usemin
 	p=pos(usemin);
-	sprintf(scratch,"%.3g",usemin);
+	sprintf(scratch,"%.1f",usemin);
 	textout(this, scratch,-1, win_w/2-2*pad-textheight,p, LAX_RIGHT|LAX_VCENTER);
 	draw_line(this, win_w/2-pad-textheight,p, win_w/2+pad,p);
 
@@ -327,6 +328,7 @@ int MagnitudeSelectWindow::MouseMove(int x,int y,unsigned int state,const LaxMou
 		return 0;
 
 	} else if (p==Usemin) {
+		if (state&ShiftMask) newp=oldp+sgn(newp-oldp)*.1;
 		usemin+=newp-oldp;
 		if (usemin<usemax) usemin=usemax;
 		if (usemin>min) usemin=min;
@@ -337,6 +339,7 @@ int MagnitudeSelectWindow::MouseMove(int x,int y,unsigned int state,const LaxMou
 		return 0;
 
 	} else if (p==Usemax) {
+		if (state&ShiftMask) newp=oldp+sgn(newp-oldp)*.1;
 		usemax+=newp-oldp;
 		if (usemax<max) usemax=max;
 		if (usemax>usemin) usemax=usemin;
@@ -1237,7 +1240,7 @@ class MainWindow : public Laxkit::RowFrame
 };
 
 MainWindow::MainWindow(RenderContext *rr)
-  : RowFrame(NULL,"Main Window","Main Window",ANXWIN_ESCAPABLE|ROWFRAME_ROWS|ANXWIN_DOUBLEBUFFER, 500,0,1200,900,0, NULL,0,NULL),
+  : RowFrame(NULL,"Main Window","Star Processor",ANXWIN_ESCAPABLE|ROWFRAME_ROWS|ANXWIN_DOUBLEBUFFER, 500,0,1200,900,0, NULL,0,NULL),
 	previewcatalog("preview",1000,0)
 {
 	refreshwidth=-1;
@@ -1262,7 +1265,7 @@ int MainWindow::init()
 {
 	anXWindow *last=NULL;
 
-	AddSpacer(win_w,0,1000,50,  win_w/2,0,1000,50, -1); //area for preview image
+	AddSpacer(win_w,500,1000,50,  win_w/2,500,1000,50, -1); //area for preview image
 	//AddSpacer(win_w/2,0,1000,50,  win_w/2,0,500,50, -1); //area for preview image
 	//AddSpacer(200,10,2000,50,  10,10,200,50, -1); //area for preview image
 	AddNull();
@@ -1522,7 +1525,7 @@ void MainWindow::UpdateWholePreview()
 		  }
 		}
 
-		if (context->stats.numstars+context->stats.numgalaxies<=0) {
+		if (context->catalogs.n==0) {
 			 //make fake milky way
 			double yd;
 			int xx,yy;
@@ -1650,7 +1653,7 @@ void MainWindow::UpdatePreview()
 	else if (previewarea.y+hh>context->height) previewarea.y=context->height-hh;
 	
 	
-	if (context->stats.numstars+context->stats.numgalaxies>0) {
+	if (context->catalogs.n>0) {
 		double minasc=previewarea.x/(double)context->width*360;
 		double maxasc=(previewarea.x+ww)/(double)context->width*360;
 		double mindec=previewarea.y/(double)context->height*180-90;
@@ -1843,6 +1846,12 @@ int MainWindow::scan(int x,int y)
 	if (!zoomed) {
 		if (y<textheight && x<refreshwidth) return REFRESH_CATS;
 
+		if (x>=previewarea.x/double(context->width)*ww
+			 && y>=previewarea.y/double(context->height)*hh
+			 && x<=previewarea.x/double(context->width)*ww+previewarea.width/double(context->width)*ww
+			 && y<=previewarea.y/double(context->height)*hh+previewarea.height/double(context->height)*hh)
+				 return PREVIEW_AREA;
+
 		p=xx+context->min_asc/360*ww;
 		cerr <<"x:"<<x<<"  p:"<<p<<"  minasc:"<<context->min_asc<<endl;
 		if (x<p+range && x>p-range) return MINASC;
@@ -1858,11 +1867,6 @@ int MainWindow::scan(int x,int y)
 		if (y<p+range && y>p-range) return MAXDEC;
 
 
-		if (x>=previewarea.x/double(context->width)*ww
-			 && y>=previewarea.y/double(context->height)*hh
-			 && x<=previewarea.x/double(context->width)*ww+previewarea.width/double(context->width)*ww
-			 && y<=previewarea.y/double(context->height)*hh+previewarea.height/double(context->height)*hh)
-				 return PREVIEW_AREA;
 	}
 
 	if (zoomed) return PREVIEW_SHIFT;
@@ -2042,6 +2046,7 @@ void InitOptions()
 	options.Add("maxstarangle", 'a', 1, "Arc minutes wide of brightest star",0, "20");
 	options.Add("bigthreshhold",'S', 1, "Magnitude brighter than this gets special size treatment",    0, "4");
 	options.Add("alpha-amp",    'A', 1, "Adjustment to artifically pump up dim stars. Between 0 and 1",0, "0");
+	options.Add("halo-image",     0, 1, "Use a custom halo image, instead of a star halo.",           1);
 	options.Add("halo",         'H', 1, "Render halos on bright stars, number is ratio of "
 		                                "halo diameter to star diameter",                              0, "7");
 	options.Add("transparent",  'T', 0, "Put stars on transparency rather than a black background",    0, NULL);
@@ -2079,6 +2084,7 @@ int main(int argc, char **argv)
 	 //initialize option variables
 	const char *tycho_file=NULL;
 	const char *pgc_file=NULL;
+	const char *halo_file=NULL;
 	double ang=-1;
 	double alphaamp=0;
 	int nox=0;
@@ -2154,6 +2160,13 @@ int main(int argc, char **argv)
 				alphaamp=strtod(o->arg(),NULL);
 				cerr <<" *** need to implement putting on base alphaamp to point amp curve:"<<alphaamp<<endl;
               } break;
+			default: {
+				switch (o->id()) {
+				  case 1: {
+					halo_file=o->arg();
+				  }
+				}
+			  }
 
 		}
 	}
@@ -2173,6 +2186,8 @@ int main(int argc, char **argv)
 			makestr(rr.projectfile,o->arg());
 		}
 	}
+
+	if (halo_file) rr.InstallHaloImage(halo_file);
 
 	DBG cout <<"Initial context:"<<endl;
 	DBG rr.dump_out(stdout,0,0,NULL);
@@ -2209,6 +2224,9 @@ int main(int argc, char **argv)
 		exit(0);
 	}
 	
+	if (rr.catalogs.n==0) {
+		rr.catalogs.push(new RandomCatalog("Random",100000,2+(rr.galactic?1:0)));
+	}
 
 	 //------set up windows...
 	anXApp app;

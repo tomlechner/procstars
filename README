@@ -1,4 +1,4 @@
-Star Field Image Generator
+Star Catalog Processor and Image Generator
 By Tom Lechner, tomlechner.com
 2013
 
@@ -14,31 +14,6 @@ For Tycho, you might try:
    http://cdsarc.u-strasbg.fr/viz-bin/Cat?target=http&cat=I%2F259&
 For the PGC, you might try:
    http://cdsarc.u-strasbg.fr/viz-bin/Cat?VII/119
-
-
-
------------------- Procstars, command line version ------------------------
-
-Usage:
-  ./procstars -S 6 -m 12 -s 12 -w 32768
-  ./procstars -S 6 -m 12 -s 6 -w 16384
-  ./procstars -c Tycho.cat -o stars.tif
-  ./procstars --help
-
-
-
-It is written in plain old C++, and is contained all in procstars.cc.
-You will need GraphicsMagick development files available. That will
-be something like:
-  sudo apt-get install libgraphicsmagick++1-dev
-
-Compiling is supposed to be easy, but you might have to modify where some 
-header files are in the Makefile.
-
-When you are ready:
-  make depends
-  make
-...and run!
 
 
 
@@ -64,6 +39,31 @@ Now you should be able to simply do:
   make procstars-gui
 
 ...and run!
+
+
+------------------ (older) Procstars, command line version ------------------------
+
+Usage:
+  ./procstars -S 6 -m 12 -s 12 -w 32768
+  ./procstars -S 6 -m 12 -s 6 -w 16384
+  ./procstars -c Tycho.cat -o stars.tif
+  ./procstars --help
+
+
+
+It is written in plain old C++, and is contained all in procstars.cc.
+You will need GraphicsMagick development files available. That will
+be something like:
+  sudo apt-get install libgraphicsmagick++1-dev
+
+Compiling is supposed to be easy, but you might have to modify where some 
+header files are in the Makefile.
+
+When you are ready:
+  make depends
+  make procstars
+...and run!
+
 
 
 

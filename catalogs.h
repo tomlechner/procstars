@@ -89,6 +89,7 @@ class RenderContext : public LaxFiles::DumpUtility
 	double bigthreshhold; //magnitude < this get big treatment
 
 	double usehalo;
+	int halotype; //0 for bw, 1 for argb
 	unsigned char *halo;
 	int halowidth; //width in pixels of halo image
 
@@ -119,6 +120,7 @@ class RenderContext : public LaxFiles::DumpUtility
 	RenderContext();
 	virtual ~RenderContext();
 	virtual void Reset(int which);
+	virtual void InstallHaloImage(const char *file);
 
 	virtual void dump_out(FILE *f,int indent,int what,Laxkit::anObject *context);
     virtual LaxFiles::Attribute *dump_out_atts(LaxFiles::Attribute *att,int what,Laxkit::anObject *context);
@@ -169,6 +171,7 @@ class Catalog
 	CatalogStats stats;
 	
 	int visible;
+	int autoadded;
 
 	 //stats
 	double minimum_magnitude;
@@ -215,7 +218,7 @@ class RandomCatalog : public Catalog
 	virtual int RefreshStats(RenderContext *context, int buildpoints);
 
 	virtual int Repopulate(int num, int spherical);
-	virtual int RepopulateFakeMilkyWay(int num);
+	virtual int RepopulateFakeMilkyWay(int num,int galactic);
 };
 
 //------------------------------- Rendering Misc -----------------------------------
